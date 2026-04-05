@@ -95,7 +95,7 @@ export class ScanWorker {
                 await tradeExecutor.updatePaperTrades(ctx);
                 const activeTrade = tradeExecutor.getActiveTrade(symbol);
                 if (activeTrade) {
-                    if (activeTrade.status !== 'ACTIVE' || activeTrade.dcaCount > 0)
+                    if (activeTrade.status === 'ACTIVE' && activeTrade.dcaCount > 0)
                         continue;
                 }
                 if (!passesGlobalFilters(ctx))

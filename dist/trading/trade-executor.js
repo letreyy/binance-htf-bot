@@ -316,31 +316,37 @@ ${pendingOrders.map(t => `- <b>${t.symbol}</b> ${t.direction} (Limit: ${t.entryP
             return;
         }
         const existingTrade = this.getActiveTrade(signal.symbol);
-        // ─── SMART DCA ───
+        // ─── SMART DCA OR OVERRIDE ───
         if (existingTrade) {
-            const priceToCompare = currentPrice || signal.levels.entry;
-            const isLong = existingTrade.direction === SignalDirection.LONG;
-            if (existingTrade.direction === signal.direction && existingTrade.dcaCount === 0 && existingTrade.status === 'ACTIVE') {
-                const drawdownPct = isLong
-                    ? (existingTrade.entryPrice - priceToCompare) / existingTrade.entryPrice * 100
-                    : (priceToCompare - existingTrade.entryPrice) / existingTrade.entryPrice * 100;
-                // HTF: DCA threshold at 2% (vs 1% on scalp)
-                if (drawdownPct >= 2.0) {
-                    const oldEntry = existingTrade.entryPrice;
-                    const newAverageEntry = (oldEntry + signal.levels.entry) / 2;
-                    existingTrade.entryPrice = newAverageEntry;
-                    existingTrade.sl = signal.levels.sl;
-                    existingTrade.tp = signal.levels.tp;
-                    existingTrade.tpHit = 0;
-                    existingTrade.remainingPortion = 1.0;
-                    existingTrade.dcaCount++;
-                    const logMsg = `${getTimestamp()} DCA: ${oldEntry.toFixed(4)} -> ${newAverageEntry.toFixed(4)} via ${signal.strategyName}`;
-                    existingTrade.history.push(logMsg);
-                    telegramNotifier.sendTextMessage(`🔥 <b>HTF SMART DCA</b>\n\n<b>${signal.symbol}</b> ${signal.direction}\nAvg Entry: <code>${oldEntry.toFixed(4)}</code> → <code>${newAverageEntry.toFixed(4)}</code>`);
-                    return;
-                }
+            // Если у нас висит неактивированная LIMIT заявка, а пришел сильный MARKET сигнал (например, Magnet)
+            if (existingTrade.status === 'PENDING' && signal.orderType === 'MARKET') {
+                logger.info(`[HTF OVERRIDE] Replacing PENDING limit on ${signal.symbol} with MARKET ${signal.direction} via ${signal.strategyName}`);
+                // Удаляем старый ордер, чтобы дать дорогу новому
+                this.activeTrades = this.activeTrades.filter(t => t.id !== existingTrade.id);
             }
-            return;
+            else {
+                const priceToCompare = currentPrice || signal.levels.entry;
+                const isLong = existingTrade.direction === SignalDirection.LONG;
+                if (existingTrade.direction === signal.direction && existingTrade.dcaCount === 0 && existingTrade.status === 'ACTIVE') {
+                    const drawdownPct = isLong
+                        ? (existingTrade.entryPrice - priceToCompare) / existingTrade.entryPrice * 100
+                        : (priceToCompare - existingTrade.entryPrice) / existingTrade.entryPrice * 100;
+                    if (drawdownPct >= 2.0) {
+                        const oldEntry = existingTrade.entryPrice;
+                        const newAverageEntry = (oldEntry + signal.levels.entry) / 2;
+                        existingTrade.entryPrice = newAverageEntry;
+                        existingTrade.sl = signal.levels.sl;
+                        existingTrade.tp = signal.levels.tp;
+                        existingTrade.tpHit = 0;
+                        existingTrade.remainingPortion = 1.0;
+                        existingTrade.dcaCount++;
+                        const logMsg = `${getTimestamp()} DCA: ${oldEntry.toFixed(4)} -> ${newAverageEntry.toFixed(4)} via ${signal.strategyName}`;
+                        existingTrade.history.push(logMsg);
+                        telegramNotifier.sendTextMessage(`🔥 <b>HTF SMART DCA</b>\n\n<b>${signal.symbol}</b> ${signal.direction}\nAvg Entry: <code>${oldEntry.toFixed(4)}</code> → <code>${newAverageEntry.toFixed(4)}</code>`);
+                    }
+                }
+                return; // Иначе игнорируем сигнал, так как сделка уже активна (или не подходит под DCA)
+            }
         }
         // ─── NEW PAPER TRADE ───
         const status = signal.orderType === 'LIMIT' ? 'PENDING' : 'ACTIVE';

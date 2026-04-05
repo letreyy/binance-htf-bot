@@ -103,7 +103,7 @@ export class ScanWorker {
 
                 const activeTrade = tradeExecutor.getActiveTrade(symbol);
                 if (activeTrade) {
-                    if (activeTrade.status !== 'ACTIVE' || activeTrade.dcaCount > 0) continue;
+                    if (activeTrade.status === 'ACTIVE' && activeTrade.dcaCount > 0) continue;
                 }
 
                 if (!passesGlobalFilters(ctx)) continue;
