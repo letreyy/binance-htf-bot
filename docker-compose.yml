@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  htf-bot:
+    build: .
+    container_name: binance-htf-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - state-data:/app/state
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  state-data:
