@@ -3,12 +3,16 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --include=dev
+# Ускоряем установку, подавляем предупреждения и аудит
+RUN npm install --include=dev --legacy-peer-deps --no-fund --no-audit
 
 COPY . .
 RUN npm run build
 
 FROM node:20-slim
+
+# Глушим любые всплывающие окна во время установки пакетов Linux (иначе сборка виснет!)
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
@@ -18,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev --legacy-peer-deps --no-fund --no-audit
 
 COPY --from=builder /app/dist ./dist
 

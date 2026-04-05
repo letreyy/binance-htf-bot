@@ -1,4 +1,4 @@
-import { HtfOrderBlockStrategy, HtfFairValueGapStrategy } from './modules/htf-smc-strategies.js';
+import { HtfOrderBlockStrategy, HtfFairValueGapStrategy, HtfObMagnetStrategy, HtfFvgMagnetStrategy } from './modules/htf-smc-strategies.js';
 import { HtfLiquiditySweepStrategy, HtfBreakoutFailureStrategy, HtfVwapReversionStrategy } from './modules/htf-core-strategies.js';
 import { HtfEmaPullbackStrategy, HtfRsiDivergenceStrategy, HtfEmaCrossMomentumStrategy, HtfBollingerReversalStrategy, HtfVolumeClimaxStrategy, HtfDeltaDivergenceStrategy } from './modules/htf-swing-strategies.js';
 import { Strategy } from './base/strategy.js';
@@ -13,6 +13,10 @@ export const strategyRegistry: Strategy[] = [
     new HtfOrderBlockStrategy(),         // OB retest — institutional levels
     new HtfFairValueGapStrategy(),       // FVG fill — imbalance retest
     new HtfLiquiditySweepStrategy(),     // Liquidity sweeps on 1H
+
+    // SMC Magnet trades (MARKET orders)
+    new HtfObMagnetStrategy(),           // Trading pullbacks towards unmitigated OBs
+    new HtfFvgMagnetStrategy(),          // Trading pullbacks towards unmitigated FVGs
 
     // Trend-following
     new HtfEmaPullbackStrategy(),        // NEW: swing pullback to EMA in trend

@@ -250,3 +250,171 @@ export class HtfFairValueGapStrategy implements Strategy {
         return null;
     }
 }
+
+export class HtfObMagnetStrategy implements Strategy {
+    name = 'HTF OB Magnet';
+    id = 'htf-ob-magnet';
+
+    execute(ctx: StrategyContext): StrategySignalCandidate | null {
+        const { candles, indicators } = ctx;
+        if (candles.length < 60) return null;
+
+        const LOOKBACK = 24; 
+        const last = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        const currentPrice = last.close;
+        
+        for (let i = candles.length - 1; i >= candles.length - LOOKBACK; i--) {
+            const current = candles[i];
+            const prev1 = candles[i - 1];
+            const prev2 = candles[i - 2];
+            if (!prev1 || !prev2) continue;
+
+            const isBullImpulse = 
+                current.close > current.open &&
+                prev1.close > prev1.open &&
+                (current.close - prev1.open) > (indicators.atr * 2.0);
+
+            if (isBullImpulse && prev2.close < prev2.open) {
+                const obHigh = prev2.high;
+                
+                let unmitigated = true;
+                for (let j = i + 1; j < candles.length; j++) {
+                    if (candles[j].low <= obHigh) {
+                        unmitigated = false; break;
+                    }
+                }
+
+                if (unmitigated && currentPrice > obHigh + (indicators.atr * 1.5)) {
+                    if (last.close < last.open && last.close < indicators.ema20 && prev.close > prev.open) {
+                        const swingHigh = Math.max(...candles.slice(-5).map(c => c.high));
+                        return {
+                            strategyName: this.name,
+                            direction: SignalDirection.SHORT,
+                            orderType: 'MARKET',
+                            suggestedEntry: currentPrice,
+                            suggestedTarget: obHigh,
+                            suggestedSl: swingHigh + (indicators.atr * 0.2),
+                            confidence: 76,
+                            reasons: [
+                                `Magnet: Price drawn to Bullish OB at ${obHigh.toFixed(4)}`,
+                                'Shorting the pullback towards the unmitigated OB',
+                                'Bearish momentum confirmation'
+                            ],
+                            expireMinutes: 120
+                        };
+                    }
+                }
+            }
+
+            const isBearImpulse = 
+                current.close < current.open &&
+                prev1.close < prev1.open &&
+                (prev1.open - current.close) > (indicators.atr * 2.0);
+
+            if (isBearImpulse && prev2.close > prev2.open) {
+                const obLow = prev2.low;
+
+                let unmitigated = true;
+                for (let j = i + 1; j < candles.length; j++) {
+                    if (candles[j].high >= obLow) {
+                        unmitigated = false; break;
+                    }
+                }
+
+                if (unmitigated && currentPrice < obLow - (indicators.atr * 1.5)) {
+                    if (last.close > last.open && last.close > indicators.ema20 && prev.close < prev.open) {
+                        const swingLow = Math.min(...candles.slice(-5).map(c => c.low));
+                        return {
+                            strategyName: this.name,
+                            direction: SignalDirection.LONG,
+                            orderType: 'MARKET',
+                            suggestedEntry: currentPrice,
+                            suggestedTarget: obLow,
+                            suggestedSl: swingLow - (indicators.atr * 0.2),
+                            confidence: 76,
+                            reasons: [
+                                `Magnet: Price drawn to Bearish OB at ${obLow.toFixed(4)}`,
+                                'Longing the pullback towards the unmitigated OB',
+                                'Bullish momentum confirmation'
+                            ],
+                            expireMinutes: 120
+                        };
+                    }
+                }
+            }
+        }
+        return null;
+    }
+}
+
+export class HtfFvgMagnetStrategy implements Strategy {
+    name = 'HTF FVG Magnet';
+    id = 'htf-fvg-magnet';
+
+    execute(ctx: StrategyContext): StrategySignalCandidate | null {
+        const { candles, indicators } = ctx;
+        if (candles.length < FVG_LOOKBACK + 5) return null;
+
+        const last = candles[candles.length - 1];
+        const prev = candles[candles.length - 2];
+        const currentPrice = last.close;
+
+        const fvgZones = findFVGs(candles, indicators.volumeSma);
+        if (fvgZones.length === 0) return null;
+
+        const currentIdx = candles.length - 1;
+
+        for (const zone of fvgZones) {
+            const age = currentIdx - zone.candleIdx;
+            if (age < 2 || age > 48 || zone.partiallyFilled) continue;
+
+            if (zone.direction === 'BULLISH' && currentPrice > zone.midpoint) {
+                if (currentPrice > zone.top + (indicators.atr * 1.5)) {
+                    if (last.close < last.open && last.close < indicators.ema20 && prev.close > prev.open) {
+                        const swingHigh = Math.max(...candles.slice(-5).map(c => c.high));
+                        return {
+                            strategyName: this.name,
+                            direction: SignalDirection.SHORT,
+                            orderType: 'MARKET',
+                            suggestedEntry: currentPrice,
+                            suggestedTarget: zone.midpoint,
+                            suggestedSl: swingHigh + (indicators.atr * 0.2),
+                            confidence: 77,
+                            reasons: [
+                                `Magnet: Price drawn to Bullish FVG at ${zone.top.toFixed(4)}`,
+                                'Shorting the pullback towards the gap',
+                                'Bearish momentum confirmation'
+                            ],
+                            expireMinutes: 120
+                        };
+                    }
+                }
+            }
+
+            if (zone.direction === 'BEARISH' && currentPrice < zone.midpoint) {
+                if (currentPrice < zone.bottom - (indicators.atr * 1.5)) {
+                    if (last.close > last.open && last.close > indicators.ema20 && prev.close < prev.open) {
+                        const swingLow = Math.min(...candles.slice(-5).map(c => c.low));
+                        return {
+                            strategyName: this.name,
+                            direction: SignalDirection.LONG,
+                            orderType: 'MARKET',
+                            suggestedEntry: currentPrice,
+                            suggestedTarget: zone.midpoint,
+                            suggestedSl: swingLow - (indicators.atr * 0.2),
+                            confidence: 77,
+                            reasons: [
+                                `Magnet: Price drawn to Bearish FVG at ${zone.bottom.toFixed(4)}`,
+                                'Longing the pullback towards the gap',
+                                'Bullish momentum confirmation'
+                            ],
+                            expireMinutes: 120
+                        };
+                    }
+                }
+            }
+        }
+        return null;
+    }
+}
