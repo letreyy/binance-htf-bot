@@ -1,19 +1,8 @@
-FROM node:20-slim AS builder
-
-WORKDIR /app
-
-COPY package*.json ./
-# Ускоряем установку, подавляем предупреждения и аудит
-RUN npm install --include=dev --legacy-peer-deps --no-fund --no-audit
-
-COPY . .
-RUN npm run build
-
 FROM node:20-slim
 
-# Глушим любые всплывающие окна во время установки пакетов Linux (иначе сборка виснет!)
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Устанавливаем компоненты для генератора картинок
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     fonts-liberation \
@@ -21,9 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Копируем конфиги пакетов
 COPY package*.json ./
+
+# Устанавливаем ТОЛЬКО продакшен зависимости (без typescript)
 RUN npm install --omit=dev --legacy-peer-deps --no-fund --no-audit
 
-COPY --from=builder /app/dist ./dist
+# Копируем весь исходный проект, ВКЛЮЧАЯ уже скомпилированную папку /dist
+COPY . .
 
 CMD ["npm", "run", "start"]

@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# dist/ - мы отправляем скомпилированный код на GitHub, чтобы не собирать его на слабом VPS
 logs/
 .env
 .DS_Store

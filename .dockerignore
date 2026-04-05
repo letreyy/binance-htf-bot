@@ -1,5 +1,5 @@
 node_modules
-dist
+# dist - разрешаем Докеру видеть папку dist
 logs
 .env
 .git
