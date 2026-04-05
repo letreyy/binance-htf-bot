@@ -2,8 +2,8 @@ import { SignalDirection } from '../core/constants/enums.js';
 import { StrategyContext, SignalLevels, StrategySignalCandidate } from '../core/types/bot-types.js';
 
 // HTF: wider risk corridor (1H candles have naturally larger ATR)
-const MIN_RISK_PERCENT = 0.5;  // Minimum SL distance: 0.5%
-const MAX_RISK_PERCENT = 3.0;  // Maximum SL distance: 3.0% (wider for 1H)
+const MIN_RISK_PERCENT = 1.0;  // Minimum SL distance: 1.0%
+const MAX_RISK_PERCENT = 5.0;  // Maximum SL distance: 5.0% (wider for high-vol HTF crypto)
 
 const TP_WEIGHTS = [0.35, 0.35, 0.15, 0.15];
 
@@ -18,9 +18,9 @@ export class RiskEngine {
         if (suggestedSl) {
             sl = suggestedSl;
         } else if (direction === SignalDirection.LONG) {
-            sl = Math.min(ctx.liquidity.localRangeLow || (entry - 2 * atr), entry - 1.5 * atr);
+            sl = Math.min(ctx.liquidity.localRangeLow || (entry - 3 * atr), entry - 2.5 * atr);
         } else {
-            sl = Math.max(ctx.liquidity.localRangeHigh || (entry + 2 * atr), entry + 1.5 * atr);
+            sl = Math.max(ctx.liquidity.localRangeHigh || (entry + 3 * atr), entry + 2.5 * atr);
         }
 
         let risk = Math.abs(entry - sl);
@@ -38,45 +38,45 @@ export class RiskEngine {
 
         if (!primaryTarget) {
             primaryTarget = direction === SignalDirection.LONG 
-                ? (ctx.liquidity.localRangeHigh || entry + risk * 3.0)
-                : (ctx.liquidity.localRangeLow || entry - risk * 3.0);
+                ? (ctx.liquidity.localRangeHigh || entry + risk * 4.0)
+                : (ctx.liquidity.localRangeLow || entry - risk * 4.0);
         }
 
         if (direction === SignalDirection.LONG && primaryTarget <= entry) {
             primaryTarget = ctx.liquidity.localRangeHigh && ctx.liquidity.localRangeHigh > entry
                 ? ctx.liquidity.localRangeHigh
-                : entry + risk * 3.0;
+                : entry + risk * 4.0;
         }
         if (direction === SignalDirection.SHORT && primaryTarget >= entry) {
             primaryTarget = ctx.liquidity.localRangeLow && ctx.liquidity.localRangeLow < entry
                 ? ctx.liquidity.localRangeLow
-                : entry - risk * 3.0;
+                : entry - risk * 4.0;
         }
 
         const targetDistance = Math.abs(primaryTarget - entry);
-        if (targetDistance < risk * 2.0) {
+        if (targetDistance < risk * 2.5) {
             primaryTarget = direction === SignalDirection.LONG
-                ? entry + risk * 2.5
-                : entry - risk * 2.5;
+                ? entry + risk * 3.0
+                : entry - risk * 3.0;
         }
 
         let tp: number[] = [];
         if (direction === SignalDirection.LONG) {
-            tp[0] = entry + (primaryTarget - entry) * 0.5;
-            tp[1] = primaryTarget;
-            tp[2] = Math.max(primaryTarget + atr, entry + risk * 2.5); 
-            tp[3] = Math.max(primaryTarget + 2 * atr, entry + risk * 3.5);
+            tp[0] = entry + (primaryTarget - entry) * 0.6; // TP1 is 60% of the movement towards main target
+            tp[1] = primaryTarget;                         // TP2 is main target
+            tp[2] = Math.max(primaryTarget + atr * 2, entry + risk * 4.0); // Extending tail targets significantly
+            tp[3] = Math.max(primaryTarget + atr * 4, entry + risk * 5.5);
         } else {
-            tp[0] = entry - (entry - primaryTarget) * 0.5;
+            tp[0] = entry - (entry - primaryTarget) * 0.6;
             tp[1] = primaryTarget;
-            tp[2] = Math.min(primaryTarget - atr, entry - risk * 2.5);
-            tp[3] = Math.min(primaryTarget - 2 * atr, entry - risk * 3.5);
+            tp[2] = Math.min(primaryTarget - atr * 2, entry - risk * 4.0);
+            tp[3] = Math.min(primaryTarget - atr * 4, entry - risk * 5.5);
         }
 
         if (direction === SignalDirection.LONG) {
-            tp = tp.map((t, i) => t > entry ? t : entry + risk * (1.5 + i * 0.5));
+            tp = tp.map((t, i) => t > entry ? t : entry + risk * (2.0 + i * 0.8));
         } else {
-            tp = tp.map((t, i) => t < entry ? t : entry - risk * (1.5 + i * 0.5));
+            tp = tp.map((t, i) => t < entry ? t : entry - risk * (2.0 + i * 0.8));
         }
 
         const rrLadder = tp.map(t => Math.abs(t - entry) / risk);
