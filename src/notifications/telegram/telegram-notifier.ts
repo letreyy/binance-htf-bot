@@ -148,7 +148,7 @@ export class TelegramNotifier {
 💰 <b>Risk/Reward:</b> 1:${s.levels.rrRatio}
 
 📋 <b>Reasons:</b>
-${s.reasons.map(r => `• ${r}`).join('\n')}
+${s.reasons.map(r => `• ${r.replace(/</g, '&lt;').replace(/>/g, '&gt;')}`).join('\n')}
 
 ⏰ <i>${new Date(s.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Europe/Moscow' })} | Valid for: ${s.expireMinutes}m</i>`;
     }
