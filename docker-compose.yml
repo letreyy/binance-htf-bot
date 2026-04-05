@@ -5,8 +5,6 @@ services:
     build: .
     container_name: binance-htf-bot
     restart: unless-stopped
-    env_file:
-      - .env
     volumes:
       - ./logs:/app/logs
       - state-data:/app/state
