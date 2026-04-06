@@ -14,8 +14,6 @@ const MEAN_REVERSION_STRATEGIES = new Set([
     'HTF BB Reversal',
     'HTF Volume Climax',
     'HTF RSI Divergence',
-    'HTF OB Magnet',
-    'HTF FVG Magnet',
 ]);
 export function passesGlobalFilters(ctx) {
     const last = ctx.candles[ctx.candles.length - 1];

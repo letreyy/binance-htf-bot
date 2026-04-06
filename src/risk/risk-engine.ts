@@ -3,7 +3,7 @@ import { StrategyContext, SignalLevels, StrategySignalCandidate } from '../core/
 
 // HTF: wider risk corridor (1H candles have naturally larger ATR)
 const MIN_RISK_PERCENT = 1.0;  // Minimum SL distance: 1.0%
-const MAX_RISK_PERCENT = 5.0;  // Maximum SL distance: 5.0% (wider for high-vol HTF crypto)
+const MAX_RISK_PERCENT = 15.0; // HTF: Wide allowance to prevent forced stop hunting in high-volatility coins
 
 const TP_WEIGHTS = [0.35, 0.35, 0.15, 0.15];
 
