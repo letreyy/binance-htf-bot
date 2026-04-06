@@ -25,10 +25,13 @@ export class TelegramNotifier {
         if (config.telegram.token) {
             const options: any = { 
                 polling: true,
-                baseApiUrl: config.telegram.baseUrl
+                baseApiUrl: config.telegram.baseUrl,
+                request: {
+                    timeout: 60000 // 60 seconds timeout to prevent socket hang up on image uploads
+                }
             };
             if (config.telegram.proxy) {
-                options.request = { proxy: config.telegram.proxy };
+                options.request.proxy = config.telegram.proxy;
             }
             this.bot = new TelegramBot(config.telegram.token, options);
             this.isPolling = true;
@@ -65,7 +68,18 @@ export class TelegramNotifier {
             });
             logger.info(`Signal sent for ${signal.symbol} via ${signal.strategyName}`);
         } catch (err: any) {
-            logger.error('Failed to send Telegram message', { error: err.message });
+            logger.error('Failed to send Telegram message with chart', { error: err.message });
+            try {
+                // Если картинка не пролезает из-за прокси (socket hang up), шлем просто текст, 
+                // чтобы не пропустить важный сигнал:
+                await this.bot.sendMessage(config.telegram.chatId, message, {
+                    parse_mode: 'HTML',
+                    reply_markup: MAIN_KEYBOARD
+                });
+                logger.info(`Fallback TEXT-ONLY signal sent for ${signal.symbol}`);
+            } catch (fallbackErr: any) {
+                logger.error('Failed to send fallback text message', { error: fallbackErr.message });
+            }
         }
     }
 
