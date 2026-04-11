@@ -9,5 +9,6 @@ export declare class StatsService {
     private checkUnlock;
     private evaluatePauses;
     private applyPause;
+    checkGlobalKillSwitch(): boolean;
 }
 export declare const statsService: StatsService;

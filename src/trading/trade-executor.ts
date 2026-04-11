@@ -370,6 +370,20 @@ ${pendingOrders.map(t => `- <b>${t.symbol}</b> ${t.direction} (Limit: ${t.entryP
         return this.activeTrades.find(t => t.symbol === symbol);
     }
 
+    /**
+     * Get number of currently active positions or pending limit orders
+     */
+    getActiveAndPendingCount(): number {
+        return this.activeTrades.length;
+    }
+
+    /**
+     * Get number of active/pending trades in a specific direction
+     */
+    getActiveCountByDirection(direction: SignalDirection): number {
+        return this.activeTrades.filter(t => t.direction === direction).length;
+    }
+
     async processSignal(signal: FinalSignal, currentPrice?: number) {
         if (this.isStrategyDisabled(signal.strategyName)) return;
         if (this.isOnSlCooldown(signal.symbol, signal.strategyName)) return;

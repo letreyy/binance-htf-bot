@@ -38,6 +38,14 @@ export declare class TradeExecutor {
     updatePaperTrades(ctx: StrategyContext): Promise<void>;
     private recordStrategyResult;
     getActiveTrade(symbol: string): PaperTrade | undefined;
+    /**
+     * Get number of currently active positions or pending limit orders
+     */
+    getActiveAndPendingCount(): number;
+    /**
+     * Get number of active/pending trades in a specific direction
+     */
+    getActiveCountByDirection(direction: SignalDirection): number;
     processSignal(signal: FinalSignal, currentPrice?: number): Promise<void>;
     private executeLiveTrade;
     private calculateLivePositionSize;

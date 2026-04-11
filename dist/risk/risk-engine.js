@@ -1,7 +1,7 @@
 import { SignalDirection } from '../core/constants/enums.js';
 // HTF: wider risk corridor (1H candles have naturally larger ATR)
 const MIN_RISK_PERCENT = 1.0; // Minimum SL distance: 1.0%
-const MAX_RISK_PERCENT = 15.0; // HTF: Wide allowance to prevent forced stop hunting in high-volatility coins
+const MAX_RISK_PERCENT = 7.0; // HTF: Capped at 7% to prevent catastrophic losses on volatile coins
 const TP_WEIGHTS = [0.35, 0.35, 0.15, 0.15];
 export class RiskEngine {
     static calculateLevels(ctx, candidate) {

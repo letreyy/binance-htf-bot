@@ -14,6 +14,7 @@ import { config } from '../config/index.js';
 import { passesGlobalFilters, passesDirectionFilter } from '../strategies/global-filters.js';
 import { TimeFilters } from '../market/time-filters.js';
 import { CombinationEngine } from '../strategies/combination-engine.js';
+import { statsService } from '../stats/stats-service.js';
 import { TelemetryLogger } from './telemetry-logger.js';
 export class ScanWorker {
     isRunning = false;
@@ -149,10 +150,45 @@ export class ScanWorker {
                     symbolSignals.sort((a, b) => b.score - a.score);
                     const finalSignal = symbolSignals[0];
                     const currentPrice = candles[candles.length - 1].close;
-                    await tradeExecutor.processSignal(finalSignal, currentPrice);
                     if (!activeTrade) {
+                        // 1. Total capacity check (lower for swing trading)
+                        const activeCount = tradeExecutor.getActiveAndPendingCount();
+                        if (activeCount >= 5) { // Hard limit 5 for HTF
+                            logger.info(`[MAX CAPACITY REACHED] Ignoring ${symbol} signal. Active: ${activeCount}/5`);
+                            continue;
+                        }
+                        // 2. Directional exposure check
+                        const directionalCount = tradeExecutor.getActiveCountByDirection(finalSignal.direction);
+                        const MAX_DIRECTIONAL = 2; // Max 2 LONGs or 2 SHORTs at once for swing
+                        if (directionalCount >= MAX_DIRECTIONAL) {
+                            logger.info(`[MAX DIRECTIONAL REACHED] Ignoring ${symbol} ${finalSignal.direction}. Already have ${directionalCount}/${MAX_DIRECTIONAL}`);
+                            continue;
+                        }
+                        // 3. BTC Momentum check (don't Long if BTC is falling on 15m/1h)
+                        if (btcContext) {
+                            const btcKlines = await binanceClient.getKlines('BTCUSDT', '1h', 5);
+                            const lastBtc = btcKlines[btcKlines.length - 1];
+                            const btcChangePct = (lastBtc.close - lastBtc.open) / lastBtc.open * 100;
+                            if (finalSignal.direction === 'LONG' && btcChangePct < -0.4) {
+                                logger.info(`[SHARP BTC DROP] Rejecting LONG on ${symbol} because BTC 1H is dropping (${btcChangePct.toFixed(2)}%)`);
+                                continue;
+                            }
+                            if (finalSignal.direction === 'SHORT' && btcChangePct > 0.4) {
+                                logger.info(`[SHARP BTC PUMP] Rejecting SHORT on ${symbol} because BTC 1H is pumping (${btcChangePct.toFixed(2)}%)`);
+                                continue;
+                            }
+                        }
+                        // 4. Global Kill Switch check
+                        if (statsService.checkGlobalKillSwitch()) {
+                            continue;
+                        }
+                        await tradeExecutor.processSignal(finalSignal, currentPrice);
                         await telegramNotifier.sendSignal(finalSignal, ctx);
                         dedupStore.recordAlert(symbol, finalSignal.strategyName, finalSignal.direction);
+                    }
+                    else {
+                        // Existing active trade: potentially do DCA
+                        await tradeExecutor.processSignal(finalSignal, currentPrice);
                     }
                 }
             }
