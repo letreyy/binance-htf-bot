@@ -141,15 +141,20 @@ export class StatsService {
     }
     // Global protection
     checkGlobalKillSwitch() {
+        // [TESTING] Disabled by user request to allow further testing despite 24h losses
+        return false;
+        /*
         const now = Date.now();
         const win24h = now - 24 * 60 * 60 * 1000;
         const recent24h = this.trades.filter(t => t.timestamp > win24h);
         const totalPnL = recent24h.reduce((s, t) => s + t.pnl, 0);
+
         if (totalPnL <= -10) {
             telegramNotifier.sendTextMessage(`🚨 <b>GLOBAL CIRCUIT BREAKER</b>: Total 24h PnL is ${totalPnL.toFixed(2)}%! Halting all new trades for 12 hours.`);
             return true;
         }
         return false;
+        */
     }
 }
 export const statsService = new StatsService();
