@@ -3,17 +3,30 @@ import { StrategyContext, SignalLevels, StrategySignalCandidate } from '../core/
 
 // HTF: wider risk corridor (1H candles have naturally larger ATR)
 const MIN_RISK_PERCENT = 1.0;  // Minimum SL distance: 1.0%
-const MAX_RISK_PERCENT = 7.0;  // HTF: Capped at 7% to prevent catastrophic losses on volatile coins
+const MAX_RISK_PERCENT = 5.0;  // HTF: Tightened from 7% — if a strategy needs more, signal is rejected
+export const REJECT_SL_ABOVE_PCT = 6.0; // Hard reject before risk engine even runs
 
 const TP_WEIGHTS = [0.35, 0.35, 0.15, 0.15];
 
 export class RiskEngine {
-    static calculateLevels(ctx: StrategyContext, candidate: StrategySignalCandidate): SignalLevels {
+    /**
+     * Returns null if the strategy's suggested SL is too wide to trade sanely.
+     * Wide SLs are the #1 source of catastrophic losses — artificially tightening
+     * them creates "guaranteed stop-outs", so we reject the signal instead.
+     */
+    static calculateLevels(ctx: StrategyContext, candidate: StrategySignalCandidate): SignalLevels | null {
         const { direction, suggestedEntry, suggestedTarget, suggestedSl } = candidate;
         const last = ctx.candles[ctx.candles.length - 1];
         const atr = ctx.indicators.atr;
         const entry = suggestedEntry || last.close;
-        
+
+        if (suggestedSl && entry > 0) {
+            const rawSlPct = (Math.abs(entry - suggestedSl) / entry) * 100;
+            if (rawSlPct > REJECT_SL_ABOVE_PCT) {
+                return null;
+            }
+        }
+
         let sl: number;
         if (suggestedSl) {
             sl = suggestedSl;
@@ -37,7 +50,7 @@ export class RiskEngine {
         let primaryTarget = suggestedTarget;
 
         if (!primaryTarget) {
-            primaryTarget = direction === SignalDirection.LONG 
+            primaryTarget = direction === SignalDirection.LONG
                 ? (ctx.liquidity.localRangeHigh || entry + risk * 4.0)
                 : (ctx.liquidity.localRangeLow || entry - risk * 4.0);
         }
@@ -62,9 +75,9 @@ export class RiskEngine {
 
         let tp: number[] = [];
         if (direction === SignalDirection.LONG) {
-            tp[0] = entry + (primaryTarget - entry) * 0.6; // TP1 is 60% of the movement towards main target
-            tp[1] = primaryTarget;                         // TP2 is main target
-            tp[2] = Math.max(primaryTarget + atr * 2, entry + risk * 4.0); // Extending tail targets significantly
+            tp[0] = entry + (primaryTarget - entry) * 0.6;
+            tp[1] = primaryTarget;
+            tp[2] = Math.max(primaryTarget + atr * 2, entry + risk * 4.0);
             tp[3] = Math.max(primaryTarget + atr * 4, entry + risk * 5.5);
         } else {
             tp[0] = entry - (entry - primaryTarget) * 0.6;

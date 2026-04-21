@@ -46,6 +46,11 @@ const DEFAULT_THRESHOLDS: Record<string, Thresholds> = {
     'HTF Trend Continuation':   { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     'HTF Mean Reversion Pro':   { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     'HTF Exhaustion Reversal':  { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
+    // V2
+    'HTF Funding Skew':         { minN24: 4, softPnl: -8,  softWR: 42, softHours: 8,  hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 52 },
+    'HTF Range Retest':         { minN24: 5, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 4, unlockWR: 52 },
+    'HTF Wyckoff Spring':       { minN24: 4, softPnl: -8,  softWR: 45, softHours: 12, hardPF: 0.85, hardLS: 3, unlockN: 3, unlockWR: 55 },
+    'HTF OI Divergence':        { minN24: 4, softPnl: -8,  softWR: 42, softHours: 8,  hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 52 },
 };
 
 const STATS_FILE = path.join(process.cwd(), 'state', 'strategy_stats.json');
@@ -178,23 +183,23 @@ export class StatsService {
         logger.warn(`Auto-pause [${type}] applied to ${strategyName}: ${reason}`);
     }
 
-    // Global protection
-    checkGlobalKillSwitch(): boolean {
-        // [TESTING] Disabled by user request to allow further testing despite 24h losses
-        return false;
+    // Global protection — halts new trades when 24h PnL crosses -8%
+    private killSwitchUntil: number = 0;
 
-        /*
+    checkGlobalKillSwitch(): boolean {
         const now = Date.now();
+        if (now < this.killSwitchUntil) return true;
+
         const win24h = now - 24 * 60 * 60 * 1000;
         const recent24h = this.trades.filter(t => t.timestamp > win24h);
         const totalPnL = recent24h.reduce((s, t) => s + t.pnl, 0);
 
-        if (totalPnL <= -10) {
-            telegramNotifier.sendTextMessage(`🚨 <b>GLOBAL CIRCUIT BREAKER</b>: Total 24h PnL is ${totalPnL.toFixed(2)}%! Halting all new trades for 12 hours.`);
+        if (totalPnL <= -8) {
+            this.killSwitchUntil = now + 12 * 60 * 60 * 1000;
+            telegramNotifier.sendTextMessage(`🚨 <b>GLOBAL CIRCUIT BREAKER</b>: 24h PnL ${totalPnL.toFixed(2)}%. Halting new trades for 12h.`);
             return true;
         }
         return false;
-        */
     }
 }
 

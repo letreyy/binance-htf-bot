@@ -1,6 +1,7 @@
 import { HtfOrderBlockStrategy, HtfFairValueGapStrategy, HtfObMagnetStrategy, HtfFvgMagnetStrategy } from './modules/htf-smc-strategies.js';
 import { HtfLiquiditySweepStrategy, HtfBreakoutFailureStrategy, HtfVwapReversionStrategy } from './modules/htf-core-strategies.js';
 import { HtfEmaPullbackStrategy, HtfRsiDivergenceStrategy, HtfEmaCrossMomentumStrategy, HtfBollingerReversalStrategy, HtfVolumeClimaxStrategy, HtfDeltaDivergenceStrategy } from './modules/htf-swing-strategies.js';
+import { HtfFundingSkewStrategy, HtfRangeRetestStrategy, HtfWyckoffSpringStrategy, HtfOpenInterestDivergenceStrategy } from './modules/htf-v2-strategies.js';
 import { Strategy } from './base/strategy.js';
 
 // ═══════════════════════════════════════════════════════
@@ -31,4 +32,10 @@ export const strategyRegistry: Strategy[] = [
     new HtfBreakoutFailureStrategy(),    // Failed breakout / bull-bear trap
     new HtfRsiDivergenceStrategy(),      // RSI divergence reversal
     new HtfVolumeClimaxStrategy(),       // Volume climax exhaustion
+
+    // V2 — added after first-run loss analysis
+    new HtfFundingSkewStrategy(),                // Crowded funding fade (range only)
+    new HtfRangeRetestStrategy(),                // Break-and-retest continuation
+    new HtfWyckoffSpringStrategy(),              // Spring / Upthrust shakeout
+    new HtfOpenInterestDivergenceStrategy(),     // OI vs price divergence — trapped flow
 ];

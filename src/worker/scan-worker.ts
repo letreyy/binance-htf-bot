@@ -103,9 +103,6 @@ export class ScanWorker {
                 await tradeExecutor.updatePaperTrades(ctx);
 
                 const activeTrade = tradeExecutor.getActiveTrade(symbol);
-                if (activeTrade) {
-                    if (activeTrade.status === 'ACTIVE' && activeTrade.dcaCount > 0) continue;
-                }
 
                 if (!passesGlobalFilters(ctx)) continue;
 
@@ -132,9 +129,14 @@ export class ScanWorker {
                 for (const candidate of allCandidates) {
                     const { score, label } = ScoringEngine.calculate(ctx, candidate);
                     const levels = RiskEngine.calculateLevels(ctx, candidate);
-                    
+
+                    if (!levels) {
+                        logger.info(`[REJECTED WIDE SL] ${symbol} ${candidate.strategyName}: suggested SL too far from entry`);
+                        continue;
+                    }
+
                     TelemetryLogger.log(symbol, candidate, levels, score);
-                    
+
                     if (score >= config.bot.minSignalScore) {
                         if (!dedupStore.isCooldown(symbol, candidate.strategyName, candidate.direction)) {
                             const leverageSuggestion = tradeExecutor.calculateLeverage(levels.riskPercent);
@@ -181,6 +183,19 @@ export class ScanWorker {
                             continue;
                         }
 
+                        // 2a. Correlation cluster cap (e.g. max 2 L1s, 2 DeFi, etc.)
+                        if (tradeExecutor.exceedsCorrelationCap(symbol)) {
+                            const group = tradeExecutor.getCorrelationGroup(symbol);
+                            logger.info(`[CORRELATION CAP] Ignoring ${symbol} — group ${group} already at capacity`);
+                            continue;
+                        }
+
+                        // 2b. 24h directional skew cap — block if >60% of recent signals lean one way
+                        if (tradeExecutor.exceedsDirectionalDailyCap(finalSignal.direction)) {
+                            logger.info(`[DIRECTIONAL SKEW CAP] Ignoring ${symbol} ${finalSignal.direction} — 24h skew > 60%`);
+                            continue;
+                        }
+
                         // 3. BTC Momentum check (don't Long if BTC is falling on 15m/1h)
                         if (btcContext) {
                             const btcKlines = await binanceClient.getKlines('BTCUSDT', '1h', 5);
@@ -205,10 +220,9 @@ export class ScanWorker {
                         await tradeExecutor.processSignal(finalSignal, currentPrice);
                         await telegramNotifier.sendSignal(finalSignal, ctx);
                         dedupStore.recordAlert(symbol, finalSignal.strategyName, finalSignal.direction);
-                    } else {
-                        // Existing active trade: potentially do DCA
-                        await tradeExecutor.processSignal(finalSignal, currentPrice);
+                        tradeExecutor.recordSignalDirection(finalSignal.direction);
                     }
+                    // Active trade exists => ignore new signal on same symbol (no DCA, no stacking).
                 }
 
             } catch (err: any) {

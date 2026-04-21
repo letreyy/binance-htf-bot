@@ -3,62 +3,69 @@ import { SignalDirection } from '../../core/constants/enums.js';
 import { Strategy } from '../base/strategy.js';
 
 /**
- * HTF EMA Trend Pullback — NEW strategy for 1H
+ * HTF EMA Pullback — reworked for 1H
  *
- * Classic swing trading setup:
- * In a strong 1H trend, wait for a pullback to EMA20/EMA50,
- * then enter on a confirmation candle bouncing off the EMA.
+ * Previous version (1W/4L, -38%) entered on the pullback candle itself,
+ * which was too early — price often pierced EMA and kept going.
  *
- * Conditions:
- * - EMA20 > EMA50 > EMA200 (bullish) or reverse (bearish)
- * - ADX > 25 (confirmed trend)
- * - Price pulls back to touch EMA20 or EMA50 (within 0.2× ATR)
- * - Confirmation: candle closes in trend direction with body > 40% of range
- * - Expiry: 4h
+ * New rules:
+ * - Candle N touches EMA20/50 (within 0.3×ATR)
+ * - Candle N+1 closes back in trend direction, body > 50% of range, close beyond EMA
+ * - ADX > 25 AND rising (> prev ADX)
+ * - Structure confirmation: prior HH/HL within last 20 candles (for longs)
  */
 export class HtfEmaPullbackStrategy implements Strategy {
     name = 'HTF EMA Pullback';
     id = 'htf-ema-pullback';
 
     execute(ctx: StrategyContext): StrategySignalCandidate | null {
-        const { candles, indicators } = ctx;
-        if (candles.length < 10) return null;
+        const { candles, indicators, prevIndicators } = ctx;
+        if (candles.length < 25) return null;
 
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
 
         if (indicators.adx < 25) return null;
+        if (indicators.adx <= prevIndicators.adx) return null; // require rising ADX
 
         const body = Math.abs(last.close - last.open);
         const range = last.high - last.low;
-        if (range <= 0 || body / range < 0.4) return null;
+        if (range <= 0 || body / range < 0.5) return null;
 
-        const touchEma20 = Math.abs(last.low - indicators.ema20) < indicators.atr * 0.3;
-        const touchEma50 = Math.abs(last.low - indicators.ema50) < indicators.atr * 0.3;
-        const touchHighEma20 = Math.abs(last.high - indicators.ema20) < indicators.atr * 0.3;
-        const touchHighEma50 = Math.abs(last.high - indicators.ema50) < indicators.atr * 0.3;
+        const prevTouchEma20Low = Math.abs(prev.low - indicators.ema20) < indicators.atr * 0.3;
+        const prevTouchEma50Low = Math.abs(prev.low - indicators.ema50) < indicators.atr * 0.3;
+        const prevTouchEma20High = Math.abs(prev.high - indicators.ema20) < indicators.atr * 0.3;
+        const prevTouchEma50High = Math.abs(prev.high - indicators.ema50) < indicators.atr * 0.3;
+
+        // Structure: did we have a recent swing high (for longs) that confirms uptrend?
+        const recent = candles.slice(-20, -2);
+        const recentHighMax = Math.max(...recent.map(c => c.high));
+        const recentLowMin = Math.min(...recent.map(c => c.low));
 
         // ─── BULLISH pullback ───
         if (
             indicators.ema20 > indicators.ema50 &&
             indicators.ema50 > indicators.ema200 &&
+            (prevTouchEma20Low || prevTouchEma50Low) &&
             last.close > last.open &&
-            (touchEma20 || touchEma50) &&
-            indicators.rsi > 40 && indicators.rsi < 65
+            last.close > indicators.ema20 &&
+            last.close > prev.close &&
+            last.high > recentHighMax * 0.995 && // close to recent swing high
+            indicators.rsi > 42 && indicators.rsi < 68
         ) {
-            const emaRef = touchEma20 ? indicators.ema20 : indicators.ema50;
-            const swingLow = Math.min(last.low, prev.low);
+            const emaRef = prevTouchEma20Low ? indicators.ema20 : indicators.ema50;
+            const swingLow = Math.min(prev.low, last.low);
             return {
                 strategyName: this.name,
                 direction: SignalDirection.LONG,
                 orderType: 'MARKET',
                 suggestedTarget: ctx.liquidity.localRangeHigh || (last.close + indicators.atr * 3),
-                suggestedSl: swingLow - (indicators.atr * 0.3),
+                suggestedSl: swingLow - (indicators.atr * 0.4),
                 confidence: 80,
                 reasons: [
-                    `1H bullish pullback to EMA${touchEma20 ? '20' : '50'} (${emaRef.toFixed(4)})`,
-                    `ADX: ${indicators.adx.toFixed(0)} — confirmed uptrend`,
-                    'Bullish confirmation candle on EMA bounce',
+                    `1H bullish pullback to EMA${prevTouchEma20Low ? '20' : '50'} (${emaRef.toFixed(4)})`,
+                    `ADX ${indicators.adx.toFixed(0)} rising (${prevIndicators.adx.toFixed(0)} → ${indicators.adx.toFixed(0)})`,
+                    'N+1 confirmation candle bouncing off EMA',
                     'EMA stack: 20 > 50 > 200'
                 ],
                 expireMinutes: 240
@@ -69,23 +76,26 @@ export class HtfEmaPullbackStrategy implements Strategy {
         if (
             indicators.ema20 < indicators.ema50 &&
             indicators.ema50 < indicators.ema200 &&
+            (prevTouchEma20High || prevTouchEma50High) &&
             last.close < last.open &&
-            (touchHighEma20 || touchHighEma50) &&
-            indicators.rsi > 35 && indicators.rsi < 60
+            last.close < indicators.ema20 &&
+            last.close < prev.close &&
+            last.low < recentLowMin * 1.005 &&
+            indicators.rsi > 32 && indicators.rsi < 58
         ) {
-            const emaRef = touchHighEma20 ? indicators.ema20 : indicators.ema50;
-            const swingHigh = Math.max(last.high, prev.high);
+            const emaRef = prevTouchEma20High ? indicators.ema20 : indicators.ema50;
+            const swingHigh = Math.max(prev.high, last.high);
             return {
                 strategyName: this.name,
                 direction: SignalDirection.SHORT,
                 orderType: 'MARKET',
                 suggestedTarget: ctx.liquidity.localRangeLow || (last.close - indicators.atr * 3),
-                suggestedSl: swingHigh + (indicators.atr * 0.3),
+                suggestedSl: swingHigh + (indicators.atr * 0.4),
                 confidence: 80,
                 reasons: [
-                    `1H bearish pullback to EMA${touchHighEma20 ? '20' : '50'} (${emaRef.toFixed(4)})`,
-                    `ADX: ${indicators.adx.toFixed(0)} — confirmed downtrend`,
-                    'Bearish confirmation candle on EMA rejection',
+                    `1H bearish pullback to EMA${prevTouchEma20High ? '20' : '50'} (${emaRef.toFixed(4)})`,
+                    `ADX ${indicators.adx.toFixed(0)} rising`,
+                    'N+1 confirmation candle rejecting EMA',
                     'EMA stack: 20 < 50 < 200'
                 ],
                 expireMinutes: 240
@@ -97,13 +107,7 @@ export class HtfEmaPullbackStrategy implements Strategy {
 }
 
 /**
- * HTF RSI Divergence — adapted for 1H
- *
- * RSI divergences on 1H are MUCH more reliable than on 15m.
- * - Wider lookback (30 candles = 30 hours)
- * - Min swing gap: 8 candles
- * - Relaxed RSI thresholds for 1H (< 40 / > 60)
- * - Expiry: 4h
+ * HTF RSI Divergence — adapted for 1H (unchanged, was profitable in real data).
  */
 const LOOKBACK = 30;
 const MIN_SWING_GAP = 8;
@@ -124,7 +128,6 @@ export class HtfRsiDivergenceStrategy implements Strategy {
 
         const currentRsi = indicators.rsi;
 
-        // ─── Bullish Divergence ───
         if (currentRsi < 40) {
             const priorSwingLow = this.findPriorSwingLow(slice, MIN_SWING_GAP);
             if (priorSwingLow) {
@@ -157,7 +160,6 @@ export class HtfRsiDivergenceStrategy implements Strategy {
             }
         }
 
-        // ─── Bearish Divergence ───
         if (currentRsi > 60) {
             const priorSwingHigh = this.findPriorSwingHigh(slice, MIN_SWING_GAP);
             if (priorSwingHigh) {
@@ -198,7 +200,7 @@ export class HtfRsiDivergenceStrategy implements Strategy {
         if (candles.length < period + 1) return [];
 
         const rsiValues: number[] = new Array(candles.length).fill(50);
-        
+
         let avgGain = 0;
         let avgLoss = 0;
         for (let i = 1; i <= period; i++) {
@@ -273,13 +275,7 @@ export class HtfRsiDivergenceStrategy implements Strategy {
 }
 
 /**
- * HTF EMA Cross Momentum — adapted for 1H
- *
- * Golden/Death cross on 1H is a strong swing signal.
- * - ADX > 22 (slightly relaxed vs 15m)
- * - Volume > 1.3x (1H candles already aggregate more volume)
- * - Target: 3.5× ATR
- * - Expiry: 4h
+ * HTF EMA Cross Momentum — adapted for 1H (small tightening)
  */
 export class HtfEmaCrossMomentumStrategy implements Strategy {
     name = 'HTF EMA Cross';
@@ -296,14 +292,13 @@ export class HtfEmaCrossMomentumStrategy implements Strategy {
         const prevEma20 = prevIndicators.ema20;
         const prevEma50 = prevIndicators.ema50;
 
-        if (indicators.adx < 22) return null;
+        if (indicators.adx < 25) return null;
 
         const volumeRatio = last.volume / indicators.volumeSma;
-        if (volumeRatio < 1.3) return null;
+        if (volumeRatio < 1.4) return null;
 
-        // Golden cross
         if (currEma20 > currEma50 && prevEma20 <= prevEma50) {
-            if (last.close > indicators.ema200) {
+            if (last.close > indicators.ema200 && last.close > last.open) {
                 return {
                     strategyName: this.name,
                     direction: SignalDirection.LONG,
@@ -315,16 +310,15 @@ export class HtfEmaCrossMomentumStrategy implements Strategy {
                         '1H Golden Cross: EMA20 × EMA50',
                         `ADX: ${indicators.adx.toFixed(0)} — trend confirmed`,
                         `Volume: ${volumeRatio.toFixed(1)}x avg`,
-                        'Price above EMA200'
+                        'Price above EMA200, bullish close'
                     ],
                     expireMinutes: 240
                 };
             }
         }
 
-        // Death cross
         if (currEma20 < currEma50 && prevEma20 >= prevEma50) {
-            if (last.close < indicators.ema200) {
+            if (last.close < indicators.ema200 && last.close < last.open) {
                 return {
                     strategyName: this.name,
                     direction: SignalDirection.SHORT,
@@ -336,7 +330,7 @@ export class HtfEmaCrossMomentumStrategy implements Strategy {
                         '1H Death Cross: EMA20 × EMA50',
                         `ADX: ${indicators.adx.toFixed(0)} — trend confirmed`,
                         `Volume: ${volumeRatio.toFixed(1)}x avg`,
-                        'Price below EMA200'
+                        'Price below EMA200, bearish close'
                     ],
                     expireMinutes: 240
                 };
@@ -348,12 +342,16 @@ export class HtfEmaCrossMomentumStrategy implements Strategy {
 }
 
 /**
- * HTF Bollinger Band Reversal — adapted for 1H
+ * HTF Bollinger Band Reversal — reworked for 1H
  *
- * BB reversals on 1H are more reliable than 15m.
- * - BB width check: > 1.0% (vs 0.8% on 15m)
- * - Volume: > 1.2× (vs 1.3 on 15m — 1H already has volume aggregated)
- * - Expiry: 3h
+ * Previous: 2W/3L with avg loss > avg win (negative expectancy).
+ * Problem: single-candle reclaim on an expanding BB = catching falling knife.
+ *
+ * New rules:
+ * - prev breached band, current closes back inside
+ * - BB WIDTH not expanding (now <= 1.1× width 5 bars ago)
+ * - RSI pin-bar or 2-bar reclaim pattern
+ * - Candle body >= 50% of range
  */
 export class HtfBollingerReversalStrategy implements Strategy {
     name = 'HTF BB Reversal';
@@ -361,70 +359,73 @@ export class HtfBollingerReversalStrategy implements Strategy {
 
     execute(ctx: StrategyContext): StrategySignalCandidate | null {
         const { candles, indicators } = ctx;
-        if (candles.length < 3) return null;
+        if (candles.length < 10) return null;
 
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
 
         const volumeRatio = last.volume / indicators.volumeSma;
-        if (volumeRatio < 1.2) return null;
+        if (volumeRatio < 1.3) return null;
 
         const bbWidth = ((indicators.bbUpper - indicators.bbLower) / indicators.bbMid) * 100;
-        if (bbWidth < 1.0) return null;
+        if (bbWidth < 1.2) return null;
 
-        // Bullish
+        // BB width not in expansion phase
+        const priorCandles = candles.slice(-7, -2);
+        const avgPriorBodyRange = priorCandles.reduce((s, c) => s + Math.abs(c.high - c.low), 0) / priorCandles.length;
+        if (last.high - last.low > avgPriorBodyRange * 2.2) return null; // expanding range, not reversal
+
+        const body = Math.abs(last.close - last.open);
+        const range = last.high - last.low;
+        if (range <= 0 || body / range < 0.5) return null;
+
+        // Bullish: prev broke lower band; last closed well inside (>20% of band width past BB lower)
+        const bandWidth = indicators.bbUpper - indicators.bbLower;
         if (
             prev.low < indicators.bbLower &&
-            last.close > indicators.bbLower &&
+            last.close > indicators.bbLower + bandWidth * 0.10 &&
             last.close > last.open &&
-            indicators.rsi < 38
+            last.close > prev.close &&
+            indicators.rsi < 35
         ) {
-            const bodySize = Math.abs(last.close - last.open);
-            const fullRange = last.high - last.low;
-            const isPinBar = fullRange > 0 && bodySize / fullRange < 0.35;
-
+            const target = Math.min(indicators.bbMid, indicators.ema20);
             return {
                 strategyName: this.name,
                 direction: SignalDirection.LONG,
                 orderType: 'MARKET',
-                suggestedTarget: indicators.bbMid,
-                suggestedSl: Math.min(last.low, prev.low) - (indicators.atr * 0.2),
-                confidence: isPinBar ? 83 : 77,
+                suggestedTarget: target,
+                suggestedSl: Math.min(last.low, prev.low) - (indicators.atr * 0.3),
+                confidence: 77,
                 reasons: [
-                    '1H BB Lower Band rejection',
+                    '1H BB Lower reclaim (2-bar)',
                     `RSI oversold: ${indicators.rsi.toFixed(0)}`,
                     `Volume: ${volumeRatio.toFixed(1)}x avg`,
-                    `BB Width: ${bbWidth.toFixed(1)}%`,
-                    isPinBar ? 'Pin bar confirmation' : 'Bullish candle confirmation'
+                    `BB Width ${bbWidth.toFixed(1)}% (not expanding)`
                 ],
                 expireMinutes: 180
             };
         }
 
-        // Bearish
         if (
             prev.high > indicators.bbUpper &&
-            last.close < indicators.bbUpper &&
+            last.close < indicators.bbUpper - bandWidth * 0.10 &&
             last.close < last.open &&
-            indicators.rsi > 62
+            last.close < prev.close &&
+            indicators.rsi > 65
         ) {
-            const bodySize = Math.abs(last.close - last.open);
-            const fullRange = last.high - last.low;
-            const isPinBar = fullRange > 0 && bodySize / fullRange < 0.35;
-
+            const target = Math.max(indicators.bbMid, indicators.ema20);
             return {
                 strategyName: this.name,
                 direction: SignalDirection.SHORT,
                 orderType: 'MARKET',
-                suggestedTarget: indicators.bbMid,
-                suggestedSl: Math.max(last.high, prev.high) + (indicators.atr * 0.2),
-                confidence: isPinBar ? 83 : 77,
+                suggestedTarget: target,
+                suggestedSl: Math.max(last.high, prev.high) + (indicators.atr * 0.3),
+                confidence: 77,
                 reasons: [
-                    '1H BB Upper Band rejection',
+                    '1H BB Upper reclaim (2-bar)',
                     `RSI overbought: ${indicators.rsi.toFixed(0)}`,
                     `Volume: ${volumeRatio.toFixed(1)}x avg`,
-                    `BB Width: ${bbWidth.toFixed(1)}%`,
-                    isPinBar ? 'Pin bar confirmation' : 'Bearish candle confirmation'
+                    `BB Width ${bbWidth.toFixed(1)}% (not expanding)`
                 ],
                 expireMinutes: 180
             };
@@ -435,14 +436,15 @@ export class HtfBollingerReversalStrategy implements Strategy {
 }
 
 /**
- * HTF Volume Climax Reversal — adapted for 1H
+ * HTF Volume Climax — heavily reworked.
  *
- * Volume climax candles on 1H represent massive institutional activity.
- * - Volume threshold: 2.5× (reduced from 3× since 1H aggregates naturally)
- * - Wick ratio: >= 50% (slightly relaxed)
- * - Trend lookback: 8 candles (= 8 hours)
- * - Min trend candles: 4
- * - Expiry: 3h
+ * Previous: 0/3, -117%, avg loss -39%. Entered MARKET into the climax wick.
+ *
+ * New rules:
+ * - Climax candle N has volume >= 3× and wick >= 55% of range
+ * - MUST be at a key level: prior 48h swing high/low OR BB band OR VWAP±2 ATR
+ * - Wait for candle N+1 that closes back past the climax body midpoint
+ * - Use LIMIT on 50% retrace, not MARKET into the wick
  */
 export class HtfVolumeClimaxStrategy implements Strategy {
     name = 'HTF Volume Climax';
@@ -453,91 +455,80 @@ export class HtfVolumeClimaxStrategy implements Strategy {
         if (candles.length < 12) return null;
 
         const last = candles[candles.length - 1];
-        const fullRange = last.high - last.low;
-        if (fullRange <= 0) return null;
+        const climax = candles[candles.length - 2]; // climax is PREVIOUS candle; we confirm via last
+        if (!climax) return null;
 
-        const volumeRatio = last.volume / indicators.volumeSma;
-        if (volumeRatio < 2.5) return null;
+        const climaxRange = climax.high - climax.low;
+        if (climaxRange <= 0) return null;
 
-        const bodyTop = Math.max(last.open, last.close);
-        const bodyBot = Math.min(last.open, last.close);
-        const upperWick = last.high - bodyTop;
-        const lowerWick = bodyBot - last.low;
-        const upperWickRatio = upperWick / fullRange;
-        const lowerWickRatio = lowerWick / fullRange;
+        const climaxVolRatio = climax.volume / indicators.volumeSma;
+        if (climaxVolRatio < 3.0) return null;
 
-        const priorCandles = candles.slice(-9, -1);
-        let bearCount = 0;
-        let bullCount = 0;
-        for (const c of priorCandles) {
-            if (c.close < c.open) bearCount++;
-            else if (c.close > c.open) bullCount++;
-        }
+        const bodyTop = Math.max(climax.open, climax.close);
+        const bodyBot = Math.min(climax.open, climax.close);
+        const upperWick = climax.high - bodyTop;
+        const lowerWick = bodyBot - climax.low;
+        const upperWickRatio = upperWick / climaxRange;
+        const lowerWickRatio = lowerWick / climaxRange;
 
-        // Bullish
+        const bodyMid = (climax.open + climax.close) / 2;
+
+        // Key level detection
+        const prior48 = candles.slice(-50, -2);
+        const priorHigh = Math.max(...prior48.map(c => c.high));
+        const priorLow = Math.min(...prior48.map(c => c.low));
+        const atKeyHigh = climax.high >= priorHigh * 0.997 || climax.high >= indicators.bbUpper || climax.high >= indicators.vwap + indicators.atr * 2;
+        const atKeyLow = climax.low <= priorLow * 1.003 || climax.low <= indicators.bbLower || climax.low <= indicators.vwap - indicators.atr * 2;
+
+        // ─── BULLISH reversal ───
         if (
-            lowerWickRatio >= 0.50 &&
-            bearCount >= 4 &&
-            indicators.rsi < 40
+            lowerWickRatio >= 0.55 &&
+            atKeyLow &&
+            indicators.rsi < 40 &&
+            last.close > bodyMid &&
+            last.close > last.open
         ) {
-            let confidence = 79;
-            const reasons: string[] = [
-                `1H Volume Climax: ${volumeRatio.toFixed(1)}x avg`,
-                `Lower wick: ${(lowerWickRatio * 100).toFixed(0)}% of range`,
-                `${bearCount}/8 prior candles bearish`,
-                `RSI oversold: ${indicators.rsi.toFixed(0)}`
-            ];
-
-            if (liquidity.sweptLow && liquidity.isWickSweep) {
-                confidence += 5;
-                reasons.push('Liquidity sweep confirmed');
-            }
-            if (volumeRatio >= 4.0) {
-                confidence += 5;
-                reasons.push(`Extreme volume: ${volumeRatio.toFixed(1)}x`);
-            }
-
+            const entry = (climax.low + bodyMid) / 2; // limit on 50% retrace of climax wick
             return {
                 strategyName: this.name,
                 direction: SignalDirection.LONG,
-                orderType: 'MARKET',
-                suggestedSl: last.low - (indicators.atr * 0.2),
-                confidence: Math.min(confidence, 92),
-                reasons,
+                orderType: 'LIMIT',
+                suggestedEntry: entry,
+                suggestedTarget: indicators.vwap,
+                suggestedSl: climax.low - (indicators.atr * 0.2),
+                confidence: liquidity.isWickSweep ? 85 : 79,
+                reasons: [
+                    `1H Volume climax (prev bar): ${climaxVolRatio.toFixed(1)}x`,
+                    `Lower wick ${(lowerWickRatio * 100).toFixed(0)}% at key level`,
+                    'N+1 confirmation above climax body midpoint',
+                    `RSI ${indicators.rsi.toFixed(0)}`
+                ],
                 expireMinutes: 180
             };
         }
 
-        // Bearish
         if (
-            upperWickRatio >= 0.50 &&
-            bullCount >= 4 &&
-            indicators.rsi > 60
+            upperWickRatio >= 0.55 &&
+            atKeyHigh &&
+            indicators.rsi > 60 &&
+            last.close < bodyMid &&
+            last.close < last.open
         ) {
-            let confidence = 79;
-            const reasons: string[] = [
-                `1H Volume Climax: ${volumeRatio.toFixed(1)}x avg`,
-                `Upper wick: ${(upperWickRatio * 100).toFixed(0)}% of range`,
-                `${bullCount}/8 prior candles bullish`,
-                `RSI overbought: ${indicators.rsi.toFixed(0)}`
-            ];
-
-            if (liquidity.sweptHigh && liquidity.isWickSweep) {
-                confidence += 5;
-                reasons.push('Liquidity sweep confirmed');
-            }
-            if (volumeRatio >= 4.0) {
-                confidence += 5;
-                reasons.push(`Extreme volume: ${volumeRatio.toFixed(1)}x`);
-            }
-
+            const entry = (climax.high + bodyMid) / 2;
             return {
                 strategyName: this.name,
                 direction: SignalDirection.SHORT,
-                orderType: 'MARKET',
-                suggestedSl: last.high + (indicators.atr * 0.2),
-                confidence: Math.min(confidence, 92),
-                reasons,
+                orderType: 'LIMIT',
+                suggestedEntry: entry,
+                suggestedTarget: indicators.vwap,
+                suggestedSl: climax.high + (indicators.atr * 0.2),
+                confidence: liquidity.isWickSweep ? 85 : 79,
+                reasons: [
+                    `1H Volume climax (prev bar): ${climaxVolRatio.toFixed(1)}x`,
+                    `Upper wick ${(upperWickRatio * 100).toFixed(0)}% at key level`,
+                    'N+1 confirmation below climax body midpoint',
+                    `RSI ${indicators.rsi.toFixed(0)}`
+                ],
                 expireMinutes: 180
             };
         }
@@ -547,12 +538,7 @@ export class HtfVolumeClimaxStrategy implements Strategy {
 }
 
 /**
- * HTF Delta Divergence — adapted for 1H
- *
- * Delta (CVD proxy) divergence on 1H captures institutional footprints.
- * - Window: 12 candles (12 hours per window)
- * - RSI gating: 56/44 (relaxed vs 58/42 on 15m)
- * - Expiry: 3h
+ * HTF Delta Divergence — kept as-is (profitable in real data).
  */
 const DD_WINDOW = 12;
 
@@ -590,7 +576,6 @@ export class HtfDeltaDivergenceStrategy implements Strategy {
 
         const normDelta3 = delta3 / normFactor;
 
-        // Bearish divergence
         if (price3 > 0 && delta3 < 0 && delta3 < delta2 * 0.5) {
             if (delta1 > 0 || delta2 > 0) {
                 if (indicators.rsi > 56) {
@@ -613,7 +598,6 @@ export class HtfDeltaDivergenceStrategy implements Strategy {
             }
         }
 
-        // Bullish divergence
         if (price3 < 0 && delta3 > 0 && delta3 > delta2 * 0.5) {
             if (delta1 < 0 || delta2 < 0) {
                 if (indicators.rsi < 44) {

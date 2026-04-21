@@ -1,15 +1,9 @@
 import { StrategyContext, StrategySignalCandidate, Candle } from '../../core/types/bot-types.js';
-import { SignalDirection } from '../../core/constants/enums.js';
+import { SignalDirection, MarketRegimeType } from '../../core/constants/enums.js';
 import { Strategy } from '../base/strategy.js';
 
 /**
- * HTF Order Block Retest — adapted for 1H
- * 
- * On 1H, order blocks are more significant and longer-lasting.
- * - Wider lookback (24 candles = 24 hours)
- * - Larger impulse threshold (2× ATR)
- * - Longer expiry (24h for limit orders)
- * - Approach zone widened to 3%
+ * HTF Order Block Retest — profitable in real data (2W/1L). Kept logic, tightened volume.
  */
 export class HtfOrderBlockStrategy implements Strategy {
     name = 'HTF Order Block';
@@ -19,19 +13,19 @@ export class HtfOrderBlockStrategy implements Strategy {
         const { candles, indicators } = ctx;
         if (candles.length < 60) return null;
 
-        const LOOKBACK = 24; // 24 hours
-        
+        const LOOKBACK = 24;
+
         for (let i = candles.length - 1; i >= candles.length - LOOKBACK; i--) {
             const current = candles[i];
             const prev1 = candles[i - 1];
             const prev2 = candles[i - 2];
             if (!prev1 || !prev2) continue;
 
-            // ─── Bullish Order Block ───
-            const isBullImpulse = 
+            const isBullImpulse =
                 current.close > current.open &&
                 prev1.close > prev1.open &&
-                (current.close - prev1.open) > (indicators.atr * 2.0);
+                (current.close - prev1.open) > (indicators.atr * 2.2) &&
+                current.volume > indicators.volumeSma * 1.5;
 
             if (isBullImpulse && prev2.close < prev2.open) {
                 const obHigh = prev2.high;
@@ -46,7 +40,7 @@ export class HtfOrderBlockStrategy implements Strategy {
 
                 if (unmitigated) {
                     const lastPrice = candles[candles.length - 1].close;
-                    if (lastPrice > obHigh && lastPrice < obHigh * 1.03) {
+                    if (lastPrice > obHigh && lastPrice < obHigh * 1.025) {
                         const obLow = prev2.low;
                         return {
                             strategyName: this.name,
@@ -67,11 +61,11 @@ export class HtfOrderBlockStrategy implements Strategy {
                 }
             }
 
-            // ─── Bearish Order Block ───
-            const isBearImpulse = 
+            const isBearImpulse =
                 current.close < current.open &&
                 prev1.close < prev1.open &&
-                (prev1.open - current.close) > (indicators.atr * 2.0);
+                (prev1.open - current.close) > (indicators.atr * 2.2) &&
+                current.volume > indicators.volumeSma * 1.5;
 
             if (isBearImpulse && prev2.close > prev2.open) {
                 const obLow = prev2.low;
@@ -86,7 +80,7 @@ export class HtfOrderBlockStrategy implements Strategy {
 
                 if (unmitigated) {
                     const lastPrice = candles[candles.length - 1].close;
-                    if (lastPrice < obLow && lastPrice > obLow * 0.97) {
+                    if (lastPrice < obLow && lastPrice > obLow * 0.975) {
                         const obHigh = prev2.high;
                         return {
                             strategyName: this.name,
@@ -113,17 +107,16 @@ export class HtfOrderBlockStrategy implements Strategy {
 }
 
 /**
- * HTF Fair Value Gap — adapted for 1H
- * 
- * 1H FVGs are more significant and are respected better than 15m FVGs.
- * - Wider lookback (72 candles = 3 days)
- * - Relaxed volume multiplier (1.4x — 1H naturally has more volume)
- * - FVG age tolerance: up to 48 candles (2 days)
- * - 24h limit order expiry
+ * HTF Fair Value Gap — tightened filters.
+ *
+ * Previous: +79% net but 42% WR and 59 signals (45% of all flow) = too noisy.
+ *
+ * New: larger min size (0.30%), higher volume (1.8×), strict unmitigated,
+ * reject if price already too far past FVG top/bottom, tighter alignment with 4H trend.
  */
 const FVG_LOOKBACK = 72;
-const FVG_MIN_SIZE_PCT = 0.12;
-const FVG_VOLUME_MULTIPLIER = 1.4;
+const FVG_MIN_SIZE_PCT = 0.30;
+const FVG_VOLUME_MULTIPLIER = 1.8;
 
 interface FVGZone {
     top: number;
@@ -134,6 +127,7 @@ interface FVGZone {
     candleIdx: number;
     volumeStrength: number;
     partiallyFilled: boolean;
+    fullyTouched: boolean;
 }
 
 function findFVGs(candles: Candle[], avgVolume: number): FVGZone[] {
@@ -159,7 +153,8 @@ function findFVGs(candles: Candle[], avgVolume: number): FVGZone[] {
                 const bottom = c0.high;
                 const midpoint = (top + bottom) / 2;
                 const partiallyFilled = candles.slice(i + 2).some(c => c.low < midpoint);
-                zones.push({ top, bottom, midpoint, direction: 'BULLISH', strength: (gapSize / midPrice) * 100, candleIdx: i, volumeStrength: volStrength, partiallyFilled });
+                const fullyTouched = candles.slice(i + 2).some(c => c.low <= bottom);
+                zones.push({ top, bottom, midpoint, direction: 'BULLISH', strength: (gapSize / midPrice) * 100, candleIdx: i, volumeStrength: volStrength, partiallyFilled, fullyTouched });
             }
         }
 
@@ -170,7 +165,8 @@ function findFVGs(candles: Candle[], avgVolume: number): FVGZone[] {
                 const bottom = c2.high;
                 const midpoint = (top + bottom) / 2;
                 const partiallyFilled = candles.slice(i + 2).some(c => c.high > midpoint);
-                zones.push({ top, bottom, midpoint, direction: 'BEARISH', strength: (gapSize / midPrice) * 100, candleIdx: i, volumeStrength: volStrength, partiallyFilled });
+                const fullyTouched = candles.slice(i + 2).some(c => c.high >= top);
+                zones.push({ top, bottom, midpoint, direction: 'BEARISH', strength: (gapSize / midPrice) * 100, candleIdx: i, volumeStrength: volStrength, partiallyFilled, fullyTouched });
             }
         }
     }
@@ -192,18 +188,26 @@ export class HtfFairValueGapStrategy implements Strategy {
         const fvgZones = findFVGs(candles, indicators.volumeSma);
         if (fvgZones.length === 0) return null;
 
+        // 4H alignment: require 4H close in trend direction
+        let htf4hBullish: boolean | null = null;
+        if (ctx.candles4h && ctx.candles4h.length > 0) {
+            const htf = ctx.candles4h[ctx.candles4h.length - 1];
+            htf4hBullish = htf.close > htf.open;
+        }
+
         const currentIdx = candles.length - 1;
 
         for (const zone of fvgZones) {
             const age = currentIdx - zone.candleIdx;
 
-            if (age < 2 || age > 48) continue;  // 2 days max on 1H
-            if (zone.partiallyFilled) continue;
+            if (age < 2 || age > 36) continue;     // max 36h — older FVGs lose edge
+            if (zone.partiallyFilled) continue;    // strict unmitigated
 
             if (zone.direction === 'BULLISH' && currentPrice > zone.midpoint) {
                 if (indicators.ema50 < indicators.ema200) continue;
-                if (indicators.rsi > 72) continue;
-                if ((currentPrice - zone.midpoint) / zone.midpoint > 0.06) continue;
+                if (indicators.rsi > 70) continue;
+                if ((currentPrice - zone.top) / zone.top > 0.03) continue; // too far past — impulse spent
+                if (htf4hBullish === false) continue;
 
                 return {
                     strategyName: this.name,
@@ -216,17 +220,18 @@ export class HtfFairValueGapStrategy implements Strategy {
                     reasons: [
                         `1H Bullish FVG: ${zone.bottom.toFixed(4)}–${zone.top.toFixed(4)}`,
                         `Equilibrium entry: ${zone.midpoint.toFixed(4)}`,
-                        `Gap: ${zone.strength.toFixed(3)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
+                        `Gap: ${zone.strength.toFixed(2)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
                         `Age: ${age}h`
                     ],
-                    expireMinutes: 60 * 24
+                    expireMinutes: 60 * 18
                 };
             }
 
             if (zone.direction === 'BEARISH' && currentPrice < zone.midpoint) {
                 if (indicators.ema50 > indicators.ema200) continue;
-                if (indicators.rsi < 28) continue;
-                if ((zone.midpoint - currentPrice) / zone.midpoint > 0.06) continue;
+                if (indicators.rsi < 30) continue;
+                if ((zone.bottom - currentPrice) / zone.bottom > 0.03) continue;
+                if (htf4hBullish === true) continue;
 
                 return {
                     strategyName: this.name,
@@ -239,10 +244,10 @@ export class HtfFairValueGapStrategy implements Strategy {
                     reasons: [
                         `1H Bearish FVG: ${zone.bottom.toFixed(4)}–${zone.top.toFixed(4)}`,
                         `Equilibrium entry: ${zone.midpoint.toFixed(4)}`,
-                        `Gap: ${zone.strength.toFixed(3)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
+                        `Gap: ${zone.strength.toFixed(2)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
                         `Age: ${age}h`
                     ],
-                    expireMinutes: 60 * 24
+                    expireMinutes: 60 * 18
                 };
             }
         }
@@ -251,33 +256,39 @@ export class HtfFairValueGapStrategy implements Strategy {
     }
 }
 
+/**
+ * HTF OB Magnet — heavily restricted. Previous: 0/2, -26%.
+ * Only fires in RANGE regime with ADX<18 and RSI extreme.
+ */
 export class HtfObMagnetStrategy implements Strategy {
     name = 'HTF OB Magnet';
     id = 'htf-ob-magnet';
 
     execute(ctx: StrategyContext): StrategySignalCandidate | null {
-        const { candles, indicators } = ctx;
+        const { candles, indicators, regime } = ctx;
         if (candles.length < 60) return null;
+        if (regime.type !== MarketRegimeType.RANGE) return null;
+        if (indicators.adx >= 18) return null;
 
-        const LOOKBACK = 24; 
+        const LOOKBACK = 24;
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
         const currentPrice = last.close;
-        
+
         for (let i = candles.length - 1; i >= candles.length - LOOKBACK; i--) {
             const current = candles[i];
             const prev1 = candles[i - 1];
             const prev2 = candles[i - 2];
             if (!prev1 || !prev2) continue;
 
-            const isBullImpulse = 
+            const isBullImpulse =
                 current.close > current.open &&
                 prev1.close > prev1.open &&
                 (current.close - prev1.open) > (indicators.atr * 2.0);
 
             if (isBullImpulse && prev2.close < prev2.open) {
                 const obHigh = prev2.high;
-                
+
                 let unmitigated = true;
                 for (let j = i + 1; j < candles.length; j++) {
                     if (candles[j].low <= obHigh) {
@@ -285,7 +296,7 @@ export class HtfObMagnetStrategy implements Strategy {
                     }
                 }
 
-                if (unmitigated && currentPrice > obHigh + (indicators.atr * 1.5)) {
+                if (unmitigated && currentPrice > obHigh + (indicators.atr * 1.5) && indicators.rsi > 78) {
                     if (last.close < last.open && last.close < indicators.ema20 && prev.close > prev.open) {
                         const swingHigh = Math.max(...candles.slice(-5).map(c => c.high));
                         return {
@@ -294,12 +305,12 @@ export class HtfObMagnetStrategy implements Strategy {
                             orderType: 'MARKET',
                             suggestedEntry: currentPrice,
                             suggestedTarget: obHigh,
-                            suggestedSl: swingHigh + (indicators.atr * 0.2),
-                            confidence: 76,
+                            suggestedSl: swingHigh + (indicators.atr * 0.4),
+                            confidence: 74,
                             reasons: [
-                                `Magnet: Price drawn to Bullish OB at ${obHigh.toFixed(4)}`,
-                                'Shorting the pullback towards the unmitigated OB',
-                                'Bearish momentum confirmation'
+                                `Magnet: RANGE regime, RSI extreme ${indicators.rsi.toFixed(0)}`,
+                                `Price drawn to Bullish OB at ${obHigh.toFixed(4)}`,
+                                'Shorting exhaustion pullback'
                             ],
                             expireMinutes: 120
                         };
@@ -307,7 +318,7 @@ export class HtfObMagnetStrategy implements Strategy {
                 }
             }
 
-            const isBearImpulse = 
+            const isBearImpulse =
                 current.close < current.open &&
                 prev1.close < prev1.open &&
                 (prev1.open - current.close) > (indicators.atr * 2.0);
@@ -322,7 +333,7 @@ export class HtfObMagnetStrategy implements Strategy {
                     }
                 }
 
-                if (unmitigated && currentPrice < obLow - (indicators.atr * 1.5)) {
+                if (unmitigated && currentPrice < obLow - (indicators.atr * 1.5) && indicators.rsi < 22) {
                     if (last.close > last.open && last.close > indicators.ema20 && prev.close < prev.open) {
                         const swingLow = Math.min(...candles.slice(-5).map(c => c.low));
                         return {
@@ -331,12 +342,12 @@ export class HtfObMagnetStrategy implements Strategy {
                             orderType: 'MARKET',
                             suggestedEntry: currentPrice,
                             suggestedTarget: obLow,
-                            suggestedSl: swingLow - (indicators.atr * 0.2),
-                            confidence: 76,
+                            suggestedSl: swingLow - (indicators.atr * 0.4),
+                            confidence: 74,
                             reasons: [
-                                `Magnet: Price drawn to Bearish OB at ${obLow.toFixed(4)}`,
-                                'Longing the pullback towards the unmitigated OB',
-                                'Bullish momentum confirmation'
+                                `Magnet: RANGE regime, RSI extreme ${indicators.rsi.toFixed(0)}`,
+                                `Price drawn to Bearish OB at ${obLow.toFixed(4)}`,
+                                'Longing exhaustion pullback'
                             ],
                             expireMinutes: 120
                         };
@@ -348,13 +359,19 @@ export class HtfObMagnetStrategy implements Strategy {
     }
 }
 
+/**
+ * HTF FVG Magnet — heavily restricted. Previous: 0/2, -57%.
+ * Only fires in RANGE regime with ADX<18 and RSI extreme.
+ */
 export class HtfFvgMagnetStrategy implements Strategy {
     name = 'HTF FVG Magnet';
     id = 'htf-fvg-magnet';
 
     execute(ctx: StrategyContext): StrategySignalCandidate | null {
-        const { candles, indicators } = ctx;
+        const { candles, indicators, regime } = ctx;
         if (candles.length < FVG_LOOKBACK + 5) return null;
+        if (regime.type !== MarketRegimeType.RANGE) return null;
+        if (indicators.adx >= 18) return null;
 
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
@@ -367,9 +384,9 @@ export class HtfFvgMagnetStrategy implements Strategy {
 
         for (const zone of fvgZones) {
             const age = currentIdx - zone.candleIdx;
-            if (age < 2 || age > 48 || zone.partiallyFilled) continue;
+            if (age < 2 || age > 36 || zone.partiallyFilled) continue;
 
-            if (zone.direction === 'BULLISH' && currentPrice > zone.midpoint) {
+            if (zone.direction === 'BULLISH' && currentPrice > zone.midpoint && indicators.rsi > 78) {
                 if (currentPrice > zone.top + (indicators.atr * 1.5)) {
                     if (last.close < last.open && last.close < indicators.ema20 && prev.close > prev.open) {
                         const swingHigh = Math.max(...candles.slice(-5).map(c => c.high));
@@ -379,11 +396,11 @@ export class HtfFvgMagnetStrategy implements Strategy {
                             orderType: 'MARKET',
                             suggestedEntry: currentPrice,
                             suggestedTarget: zone.midpoint,
-                            suggestedSl: swingHigh + (indicators.atr * 0.2),
-                            confidence: 77,
+                            suggestedSl: swingHigh + (indicators.atr * 0.4),
+                            confidence: 75,
                             reasons: [
-                                `Magnet: Price drawn to Bullish FVG at ${zone.top.toFixed(4)}`,
-                                'Shorting the pullback towards the gap',
+                                `Magnet: RANGE + RSI ${indicators.rsi.toFixed(0)}`,
+                                `Drawn to Bullish FVG ${zone.top.toFixed(4)}`,
                                 'Bearish momentum confirmation'
                             ],
                             expireMinutes: 120
@@ -392,7 +409,7 @@ export class HtfFvgMagnetStrategy implements Strategy {
                 }
             }
 
-            if (zone.direction === 'BEARISH' && currentPrice < zone.midpoint) {
+            if (zone.direction === 'BEARISH' && currentPrice < zone.midpoint && indicators.rsi < 22) {
                 if (currentPrice < zone.bottom - (indicators.atr * 1.5)) {
                     if (last.close > last.open && last.close > indicators.ema20 && prev.close < prev.open) {
                         const swingLow = Math.min(...candles.slice(-5).map(c => c.low));
@@ -402,11 +419,11 @@ export class HtfFvgMagnetStrategy implements Strategy {
                             orderType: 'MARKET',
                             suggestedEntry: currentPrice,
                             suggestedTarget: zone.midpoint,
-                            suggestedSl: swingLow - (indicators.atr * 0.2),
-                            confidence: 77,
+                            suggestedSl: swingLow - (indicators.atr * 0.4),
+                            confidence: 75,
                             reasons: [
-                                `Magnet: Price drawn to Bearish FVG at ${zone.bottom.toFixed(4)}`,
-                                'Longing the pullback towards the gap',
+                                `Magnet: RANGE + RSI ${indicators.rsi.toFixed(0)}`,
+                                `Drawn to Bearish FVG ${zone.bottom.toFixed(4)}`,
                                 'Bullish momentum confirmation'
                             ],
                             expireMinutes: 120
