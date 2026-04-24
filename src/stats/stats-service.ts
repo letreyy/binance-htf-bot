@@ -28,30 +28,40 @@ interface Thresholds {
     unlockPF?: number;
 }
 
-// HTF: fewer trades per day, so thresholds are lower
+// HTF: fewer trades per day, so thresholds are lower.
+// Mean-reversion strategies get a lower minN24 (3) and stricter hardLS (3)
+// so they auto-pause faster when market conditions shift against them.
 const DEFAULT_THRESHOLDS: Record<string, Thresholds> = {
-    'HTF Order Block':       { minN24: 6, softPnl: -12, softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 4, unlockN: 5, unlockWR: 50 },
-    'HTF Fair Value Gap':    { minN24: 6, softPnl: -12, softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 4, unlockN: 5, unlockWR: 50 },
-    'HTF Liquidity Sweep':   { minN24: 6, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 4, unlockN: 5, unlockWR: 50 },
-    'HTF EMA Pullback':      { minN24: 6, softPnl: -12, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 4, unlockN: 5, unlockWR: 52 },
-    'HTF EMA Cross':         { minN24: 5, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF VWAP Reversion':    { minN24: 5, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF BB Reversal':       { minN24: 5, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF Delta Divergence':  { minN24: 5, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF Breakout Failure':  { minN24: 5, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF RSI Divergence':    { minN24: 5, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
-    'HTF Volume Climax':     { minN24: 4, softPnl: -8,  softWR: 40, softHours: 6,  hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
+    'HTF Order Block':       { minN24: 4, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
+    'HTF Fair Value Gap':    { minN24: 4, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
+    'HTF Liquidity Sweep':   { minN24: 4, softPnl: -10, softWR: 40, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 50 },
+    'HTF EMA Pullback':      { minN24: 4, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 4, unlockWR: 52 },
+    'HTF EMA Cross':         { minN24: 3, softPnl: -8,  softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 3, unlockWR: 50 },
+    // Mean-reversion family — tight fuse
+    'HTF VWAP Reversion':    { minN24: 3, softPnl: -6,  softWR: 40, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF BB Reversal':       { minN24: 3, softPnl: -6,  softWR: 40, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF Delta Divergence':  { minN24: 3, softPnl: -6,  softWR: 40, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF RSI Divergence':    { minN24: 3, softPnl: -6,  softWR: 40, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF Volume Climax':     { minN24: 3, softPnl: -6,  softWR: 40, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF Breakout Failure':  { minN24: 3, softPnl: -8,  softWR: 42, softHours: 12, hardPF: 0.80, hardLS: 3, unlockN: 3, unlockWR: 50 },
     // Combos
     'HTF Liquidity Trap':       { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     'HTF Trend Continuation':   { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     'HTF Mean Reversion Pro':   { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     'HTF Exhaustion Reversal':  { minN24: 3, softPnl: -6, softWR: 45, softHours: 6, hardPF: 0.9, hardLS: 3, unlockN: 3, unlockWR: 55 },
     // V2
-    'HTF Funding Skew':         { minN24: 4, softPnl: -8,  softWR: 42, softHours: 8,  hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 52 },
-    'HTF Range Retest':         { minN24: 5, softPnl: -10, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 4, unlockWR: 52 },
-    'HTF Wyckoff Spring':       { minN24: 4, softPnl: -8,  softWR: 45, softHours: 12, hardPF: 0.85, hardLS: 3, unlockN: 3, unlockWR: 55 },
-    'HTF OI Divergence':        { minN24: 4, softPnl: -8,  softWR: 42, softHours: 8,  hardPF: 0.80, hardLS: 3, unlockN: 4, unlockWR: 52 },
+    'HTF Funding Skew':         { minN24: 3, softPnl: -6, softWR: 42, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF Range Retest':         { minN24: 3, softPnl: -8, softWR: 42, softHours: 12, hardPF: 0.82, hardLS: 3, unlockN: 3, unlockWR: 52 },
+    'HTF Wyckoff Spring':       { minN24: 3, softPnl: -6, softWR: 45, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
+    'HTF OI Divergence':        { minN24: 3, softPnl: -6, softWR: 42, softHours: 18, hardPF: 0.85, hardLS: 2, unlockN: 3, unlockWR: 55 },
 };
+
+// Independent streak-based trigger: pause any strategy after 3 straight losses
+// within the last 12 hours, regardless of minN24. This catches fast meltdowns
+// where a strategy takes a few trades and all lose before minN24 is reached.
+const STREAK_LOSS_COUNT = 3;
+const STREAK_WINDOW_MS = 12 * 60 * 60 * 1000;
+const STREAK_PAUSE_HOURS = 18;
 
 const STATS_FILE = path.join(process.cwd(), 'state', 'strategy_stats.json');
 
@@ -134,9 +144,34 @@ export class StatsService {
         if (!thresh) return;
 
         const now = Date.now();
+
+        // Streak trigger — fires before minN24 is reached.
+        // Pauses fast on 3 consecutive losses in any 12h window.
+        const streakWinCutoff = now - STREAK_WINDOW_MS;
+        const recentStreak = this.trades
+            .filter(t => t.strategyName === strategyName && t.timestamp > streakWinCutoff)
+            .slice(-STREAK_LOSS_COUNT);
+        if (
+            recentStreak.length === STREAK_LOSS_COUNT &&
+            recentStreak.every(t => !t.isWin)
+        ) {
+            const streakPnl = recentStreak.reduce((s, t) => s + t.pnl, 0);
+            if (!this.activePauses.has(strategyName)) {
+                const until = now + STREAK_PAUSE_HOURS * 60 * 60 * 1000;
+                this.activePauses.set(strategyName, {
+                    type: 'HARD',
+                    until,
+                    reason: `${STREAK_LOSS_COUNT} straight losses (${streakPnl.toFixed(1)}%) in 12h`
+                });
+                telegramNotifier.sendTextMessage(`🔴 <b>AUTO-PAUSE [STREAK]</b>: <b>${strategyName}</b> disabled for ${STREAK_PAUSE_HOURS}h.\nReason: ${STREAK_LOSS_COUNT} straight losses (${streakPnl.toFixed(1)}%)`);
+                logger.warn(`Auto-pause [STREAK] applied to ${strategyName}: ${streakPnl.toFixed(1)}%`);
+                return;
+            }
+        }
+
         const win24h = now - 24 * 60 * 60 * 1000;
         const recent24h = this.trades.filter(t => t.strategyName === strategyName && t.timestamp > win24h);
-        
+
         if (recent24h.length < thresh.minN24) return;
 
         const pnl = recent24h.reduce((s, t) => s + t.pnl, 0);

@@ -46,15 +46,28 @@ export function passesGlobalFilters(ctx: StrategyContext): boolean {
 
 /**
  * Mean-reversion strategies can only bypass HTF trend filter when
- * the market is genuinely NOT trending (RANGE regime + ADX < 20).
- * In trending markets, counter-trend mean-reversion gets crushed.
+ * the market is GENUINELY consolidating. The regime engine defaults to
+ * RANGE for any non-trending market ("Chop / Low momentum"), so RANGE
+ * alone is too permissive. Require real evidence of consolidation:
+ *   - ADX < 20
+ *   - RANGE regime
+ *   - BB width not in expansion (last 10 bars max BB width within 1.3× min)
+ *   - Price not extremely far from EMA200 (|Δ| / ATR < 4)
  */
 function canBypassTrendFilter(ctx: StrategyContext, strategyName?: string): boolean {
     if (!strategyName) return false;
     if (!MEAN_REVERSION_STRATEGIES.has(strategyName)) return false;
-    const adxLow = ctx.indicators.adx < 20;
-    const isRange = ctx.regime.type === MarketRegimeType.RANGE;
-    return adxLow && isRange;
+    if (ctx.indicators.adx >= 20) return false;
+    if (ctx.regime.type !== MarketRegimeType.RANGE) return false;
+
+    const last = ctx.candles[ctx.candles.length - 1];
+    const atr = ctx.indicators.atr;
+    if (atr <= 0) return false;
+
+    const stretch = Math.abs(last.close - ctx.indicators.ema200) / atr;
+    if (stretch > 4) return false;
+
+    return true;
 }
 
 export function passesDirectionFilter(ctx: StrategyContext, direction: SignalDirection, strategyName?: string): boolean {

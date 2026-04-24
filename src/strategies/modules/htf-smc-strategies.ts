@@ -107,15 +107,18 @@ export class HtfOrderBlockStrategy implements Strategy {
 }
 
 /**
- * HTF Fair Value Gap — tightened filters.
+ * HTF Fair Value Gap — rebuilt (round 2).
  *
- * Previous: +79% net but 42% WR and 59 signals (45% of all flow) = too noisy.
- *
- * New: larger min size (0.30%), higher volume (1.8×), strict unmitigated,
- * reject if price already too far past FVG top/bottom, tighter alignment with 4H trend.
+ * Last round: tightened but still 0/4 -30%. Problems found:
+ *   - rsi < 70 / rsi > 30 way too lax for trend entries → caught late pops
+ *   - `ema50 > ema200` alone is a dead-cat-trend filter (bounce in downtrend
+ *     can satisfy it briefly). Need full stack `ema20 > ema50 > ema200`.
+ *   - 4H alignment was optional; now required.
+ *   - Max age 36 → 24h (older FVGs are stale).
+ *   - 3% past-FVG cap → 1.5% (less chasing).
  */
 const FVG_LOOKBACK = 72;
-const FVG_MIN_SIZE_PCT = 0.30;
+const FVG_MIN_SIZE_PCT = 0.35;
 const FVG_VOLUME_MULTIPLIER = 1.8;
 
 interface FVGZone {
@@ -197,17 +200,21 @@ export class HtfFairValueGapStrategy implements Strategy {
 
         const currentIdx = candles.length - 1;
 
+        // 4H alignment is now REQUIRED — no ambiguous/null trades
+        if (htf4hBullish === null) return null;
+
         for (const zone of fvgZones) {
             const age = currentIdx - zone.candleIdx;
 
-            if (age < 2 || age > 36) continue;     // max 36h — older FVGs lose edge
-            if (zone.partiallyFilled) continue;    // strict unmitigated
+            if (age < 2 || age > 24) continue;
+            if (zone.partiallyFilled) continue;
 
             if (zone.direction === 'BULLISH' && currentPrice > zone.midpoint) {
-                if (indicators.ema50 < indicators.ema200) continue;
-                if (indicators.rsi > 70) continue;
-                if ((currentPrice - zone.top) / zone.top > 0.03) continue; // too far past — impulse spent
-                if (htf4hBullish === false) continue;
+                // Full EMA stack required
+                if (!(indicators.ema20 > indicators.ema50 && indicators.ema50 > indicators.ema200)) continue;
+                if (indicators.rsi > 62) continue; // no chasing late extensions
+                if ((currentPrice - zone.top) / zone.top > 0.015) continue; // tightened
+                if (!htf4hBullish) continue;
 
                 return {
                     strategyName: this.name,
@@ -216,22 +223,22 @@ export class HtfFairValueGapStrategy implements Strategy {
                     suggestedEntry: zone.midpoint,
                     suggestedTarget: ctx.liquidity.localRangeHigh || (zone.top + (zone.top - zone.bottom) * 3),
                     suggestedSl: zone.bottom - (indicators.atr * 0.3),
-                    confidence: 83,
+                    confidence: 82,
                     reasons: [
                         `1H Bullish FVG: ${zone.bottom.toFixed(4)}–${zone.top.toFixed(4)}`,
                         `Equilibrium entry: ${zone.midpoint.toFixed(4)}`,
                         `Gap: ${zone.strength.toFixed(2)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
-                        `Age: ${age}h`
+                        `Age: ${age}h | 4H bullish + full EMA stack`
                     ],
-                    expireMinutes: 60 * 18
+                    expireMinutes: 60 * 12
                 };
             }
 
             if (zone.direction === 'BEARISH' && currentPrice < zone.midpoint) {
-                if (indicators.ema50 > indicators.ema200) continue;
-                if (indicators.rsi < 30) continue;
-                if ((zone.bottom - currentPrice) / zone.bottom > 0.03) continue;
-                if (htf4hBullish === true) continue;
+                if (!(indicators.ema20 < indicators.ema50 && indicators.ema50 < indicators.ema200)) continue;
+                if (indicators.rsi < 38) continue;
+                if ((zone.bottom - currentPrice) / zone.bottom > 0.015) continue;
+                if (htf4hBullish) continue;
 
                 return {
                     strategyName: this.name,
@@ -240,14 +247,14 @@ export class HtfFairValueGapStrategy implements Strategy {
                     suggestedEntry: zone.midpoint,
                     suggestedTarget: ctx.liquidity.localRangeLow || (zone.bottom - (zone.top - zone.bottom) * 3),
                     suggestedSl: zone.top + (indicators.atr * 0.3),
-                    confidence: 83,
+                    confidence: 82,
                     reasons: [
                         `1H Bearish FVG: ${zone.bottom.toFixed(4)}–${zone.top.toFixed(4)}`,
                         `Equilibrium entry: ${zone.midpoint.toFixed(4)}`,
                         `Gap: ${zone.strength.toFixed(2)}% | Vol: ${zone.volumeStrength.toFixed(1)}x`,
-                        `Age: ${age}h`
+                        `Age: ${age}h | 4H bearish + full EMA stack`
                     ],
-                    expireMinutes: 60 * 18
+                    expireMinutes: 60 * 12
                 };
             }
         }

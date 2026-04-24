@@ -29,10 +29,15 @@ export class MarketRegimeEngine {
       return { type: MarketRegimeType.RANGE, strength: 60, description: 'Tight range (Squeeze)' };
     }
 
-    if (adx < 20) {
+    // Genuine consolidation: low ADX AND price close to mean (within BB)
+    const price = candles[candles.length - 1].close;
+    const insideBB = price < bbUpper && price > bbLower;
+    if (adx < 20 && insideBB) {
       return { type: MarketRegimeType.RANGE, strength: 50, description: 'Sideways consolidation' };
     }
 
-    return { type: MarketRegimeType.RANGE, strength: 40, description: 'Chop / Low momentum' };
+    // Chop = low-momentum but not a clean range — counter-trend bots should stay out.
+    // Classify as UNKNOWN so mean-reversion bypass can't engage.
+    return { type: MarketRegimeType.UNKNOWN, strength: 40, description: 'Chop / Low momentum (no clear regime)' };
   }
 }

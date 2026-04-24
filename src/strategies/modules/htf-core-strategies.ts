@@ -1,5 +1,5 @@
 import { StrategyContext, StrategySignalCandidate } from '../../core/types/bot-types.js';
-import { SignalDirection } from '../../core/constants/enums.js';
+import { SignalDirection, MarketRegimeType } from '../../core/constants/enums.js';
 import { Strategy } from '../base/strategy.js';
 
 /**
@@ -145,73 +145,96 @@ export class HtfBreakoutFailureStrategy implements Strategy {
 }
 
 /**
- * HTF VWAP Reversion — reworked.
+ * HTF VWAP Reversion — rebuilt.
  *
- * Previous: 0/2, -39%. Fired during trending markets thanks to the mean-rev bypass,
- * which is now removed. Added: flat-VWAP requirement + stretch cap.
+ * Previous: 0/2, -39% then 0/1 -35%. Two issues:
+ *   1) VWAP resets at UTC midnight; in the first few hours of the UTC day
+ *      VWAP is built from only a handful of candles, so "deviation vs VWAP"
+ *      is basically noise. Fall back to BB-midline (SMA20) anchor when the
+ *      VWAP sample is too thin.
+ *   2) "Flat VWAP" check compared VWAP to SMA10 of closes — apples to
+ *      oranges. Replaced with a real slope check against the BB midline.
+ *
+ * New rules:
+ * - Regime RANGE + ADX < 20
+ * - Use BB midline as anchor (it's more stable than intraday VWAP on 1H)
+ * - Require deviation 2–4 ATR from anchor
+ * - Anchor (SMA20) must be genuinely flat: slope over 5 bars < 0.5%
+ * - 2-bar reversal: prev started the reversal, last confirms with breakout
  */
 export class HtfVwapReversionStrategy implements Strategy {
     name = 'HTF VWAP Reversion';
     id = 'htf-vwap-reversion';
 
     execute(ctx: StrategyContext): StrategySignalCandidate | null {
-        const { indicators, candles } = ctx;
-        if (candles.length < 15) return null;
+        const { indicators, candles, regime } = ctx;
+        if (candles.length < 25) return null;
+
+        if (regime.type !== MarketRegimeType.RANGE) return null;
+        if (indicators.adx >= 20) return null;
 
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
 
-        const deviationAbs = Math.abs(last.close - indicators.vwap);
-        const adaptiveThreshold = indicators.atr * 2.0;
-        if (deviationAbs < adaptiveThreshold) return null;
+        // Use BB midline (SMA20) — more reliable than intraday VWAP on 1H
+        const anchor = indicators.bbMid;
+        if (anchor <= 0) return null;
 
-        // Extreme stretch: skip (strong move, not mean-reversion)
-        if (deviationAbs > indicators.atr * 5) return null;
+        const deviationAbs = Math.abs(last.close - anchor);
+        const minDeviation = indicators.atr * 2.0;
+        const maxDeviation = indicators.atr * 4.0;
+        if (deviationAbs < minDeviation || deviationAbs > maxDeviation) return null;
 
-        // VWAP must be relatively flat — if it's running with the move, no mean-rev
-        const vwapApprox10 = candles.slice(-11, -1).reduce((s, c) => s + c.close, 0) / 10;
-        const vwapSlopePct = Math.abs(indicators.vwap - vwapApprox10) / indicators.vwap * 100;
-        if (vwapSlopePct > 0.8) return null;
+        // Anchor must be flat: SMA20 5 bars ago vs now. Build a rough SMA20 via closes.
+        const closes = candles.map(c => c.close);
+        const sma20Now = closes.slice(-20).reduce((s, c) => s + c, 0) / 20;
+        const sma20Prior = closes.slice(-25, -5).reduce((s, c) => s + c, 0) / 20;
+        const anchorSlopePct = Math.abs(sma20Now - sma20Prior) / sma20Now * 100;
+        if (anchorSlopePct > 0.5) return null; // drifting anchor — no mean-reversion setup
 
-        const deviation = (last.close - indicators.vwap) / indicators.vwap;
-        const deviationPct = (deviation * 100).toFixed(2);
+        const volumeRatio = last.volume / indicators.volumeSma;
+        if (volumeRatio < 1.3) return null;
 
-        if (last.close < indicators.vwap && indicators.rsi < 36) {
-            const bullishConfirm = last.close > last.open && last.close > prev.close;
-            if (!bullishConfirm) return null;
-            if (last.volume > indicators.volumeSma * 1.3) {
+        const deviationPct = ((last.close - anchor) / anchor * 100).toFixed(2);
+
+        if (last.close < anchor && indicators.rsi < 32) {
+            const prevReversal = prev.close > prev.open && prev.close > prev.low + (prev.high - prev.low) * 0.5;
+            const lastConfirm = last.close > last.open && last.close > prev.close && last.close > prev.high;
+            if (prevReversal && lastConfirm) {
                 const swingLow = Math.min(...candles.slice(-5).map(c => c.low));
                 return {
                     strategyName: this.name,
                     direction: SignalDirection.LONG,
-                    suggestedTarget: indicators.vwap,
+                    suggestedTarget: anchor,
                     suggestedSl: swingLow - (indicators.atr * 0.3),
-                    confidence: 78,
+                    confidence: 76,
                     reasons: [
-                        `1H VWAP deviation: ${deviationPct}% (flat VWAP)`,
-                        'RSI oversold + bullish confirmation',
-                        'Mean reversion to daily VWAP'
+                        `1H stretched ${deviationPct}% below SMA20 (flat anchor)`,
+                        `RSI deeply oversold: ${indicators.rsi.toFixed(0)}`,
+                        '2-bar reversal + prev-bar breakout',
+                        `Range + ADX ${indicators.adx.toFixed(0)}`
                     ],
                     expireMinutes: 180
                 };
             }
         }
 
-        if (last.close > indicators.vwap && indicators.rsi > 64) {
-            const bearishConfirm = last.close < last.open && last.close < prev.close;
-            if (!bearishConfirm) return null;
-            if (last.volume > indicators.volumeSma * 1.3) {
+        if (last.close > anchor && indicators.rsi > 68) {
+            const prevReversal = prev.close < prev.open && prev.close < prev.high - (prev.high - prev.low) * 0.5;
+            const lastConfirm = last.close < last.open && last.close < prev.close && last.close < prev.low;
+            if (prevReversal && lastConfirm) {
                 const swingHigh = Math.max(...candles.slice(-5).map(c => c.high));
                 return {
                     strategyName: this.name,
                     direction: SignalDirection.SHORT,
-                    suggestedTarget: indicators.vwap,
+                    suggestedTarget: anchor,
                     suggestedSl: swingHigh + (indicators.atr * 0.3),
-                    confidence: 78,
+                    confidence: 76,
                     reasons: [
-                        `1H VWAP deviation: +${deviationPct}% (flat VWAP)`,
-                        'RSI overbought + bearish confirmation',
-                        'Mean reversion to daily VWAP'
+                        `1H stretched +${deviationPct}% above SMA20 (flat anchor)`,
+                        `RSI deeply overbought: ${indicators.rsi.toFixed(0)}`,
+                        '2-bar rejection + prev-bar breakdown',
+                        `Range + ADX ${indicators.adx.toFixed(0)}`
                     ],
                     expireMinutes: 180
                 };
