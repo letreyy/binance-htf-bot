@@ -1,7 +1,28 @@
 import { binanceClient } from '../../exchange/binance/binance-client.js';
 import { config } from '../../config/index.js';
 import { logger } from '../../core/utils/logger.js';
-const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const MIN_QUOTE_VOLUME_USD = 200_000_000; // $200M/24h minimum
+// Patterns that indicate memecoin / low-float / unstable tokens.
+// These produce extreme 1H wicks that destroy HTF signals.
+const MEMECOIN_PATTERNS = [
+    /^1000/, // 1000PEPE, 1000SHIB, 1000FLOKI, 1000BONK etc.
+    /PEPE/,
+    /FLOKI/,
+    /SHIB/,
+    /BONK/,
+    /DOGE/,
+    /WIF/,
+    /MEME/,
+    /MOG/,
+    /POPCAT/,
+    /TURBO/,
+    /GOAT/,
+    /AIDOGE/,
+];
+function looksLikeMemecoin(symbol) {
+    return MEMECOIN_PATTERNS.some(re => re.test(symbol));
+}
 export class UniverseLoader {
     lastUpdate = 0;
     cachedSymbols = [];
@@ -35,23 +56,25 @@ export class UniverseLoader {
         try {
             logger.info('Refreshing universe (Top-N symbols by 24h volume)...');
             const ticker = await binanceClient.get24hTicker();
-            const perpetuals = ticker
+            const filtered = ticker
                 .filter(t => t.symbol.endsWith('USDT'))
                 .filter(t => {
+                // Listed < 30 days = no stable price history for 1H
                 const onboard = this.listingDates.get(t.symbol);
-                if (onboard && now - onboard < TWO_WEEKS_MS) {
+                if (onboard && now - onboard < THIRTY_DAYS_MS)
                     return false;
-                }
                 return true;
             })
                 .filter(t => !this.disabledSymbols.has(t.symbol))
+                .filter(t => !looksLikeMemecoin(t.symbol))
+                .filter(t => parseFloat(t.quoteVolume) >= MIN_QUOTE_VOLUME_USD)
                 .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
                 .slice(0, config.bot.topN)
                 .map(t => t.symbol);
-            this.cachedSymbols = perpetuals;
+            this.cachedSymbols = filtered;
             this.lastUpdate = now;
-            logger.info(`Universe updated. Top ${perpetuals.length} symbols loaded.`);
-            return perpetuals;
+            logger.info(`Universe updated. ${filtered.length} symbols (min vol $${(MIN_QUOTE_VOLUME_USD / 1e6).toFixed(0)}M, memecoins filtered).`);
+            return filtered;
         }
         catch (err) {
             logger.error('Failed to refresh universe', { error: err.message });

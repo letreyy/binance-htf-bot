@@ -1,12 +1,7 @@
 import { StrategyContext, StrategySignalCandidate } from '../../core/types/bot-types.js';
 import { Strategy } from '../base/strategy.js';
 /**
- * HTF Liquidity Sweep — adapted for 1H
- *
- * On 1H, sweeps are far more significant because they represent
- * multi-hour liquidity pools rather than 15m noise.
- * - Requires 1.3× volume (vs 1.2× on 15m)
- * - Longer limit expiry (6h)
+ * HTF Liquidity Sweep — profitable in real data (1/0). Slight tightening.
  */
 export declare class HtfLiquiditySweepStrategy implements Strategy {
     name: string;
@@ -14,12 +9,11 @@ export declare class HtfLiquiditySweepStrategy implements Strategy {
     execute(ctx: StrategyContext): StrategySignalCandidate | null;
 }
 /**
- * HTF Breakout Failure — adapted for 1H
+ * HTF Breakout Failure — reworked.
  *
- * Failed breakouts on 1H are extremely significant — they represent
- * institutional stop hunts across 48h ranges.
- * - Requires 1.5× volume spike
- * - Longer expiry (2h)
+ * Previous: 0/1 at -75% — entered MARKET on the failure candle's close, catching the wick.
+ * New: LIMIT at range level on retest, require return inside >= 30% of range,
+ * require N+1 close back inside as confirmation.
  */
 export declare class HtfBreakoutFailureStrategy implements Strategy {
     name: string;
@@ -27,14 +21,22 @@ export declare class HtfBreakoutFailureStrategy implements Strategy {
     execute(ctx: StrategyContext): StrategySignalCandidate | null;
 }
 /**
- * HTF VWAP Reversion — adapted for 1H
+ * HTF VWAP Reversion — rebuilt.
  *
- * VWAP mean reversion is even MORE reliable on HTF because
- * daily VWAP acts as an institutional fair value anchor.
- * - Wider adaptive threshold (2× ATR instead of 1.5×)
- * - RSI thresholds relaxed slightly (< 38 / > 62)
- * - Volume requirement: 1.2× avg
- * - Expiry: 3h
+ * Previous: 0/2, -39% then 0/1 -35%. Two issues:
+ *   1) VWAP resets at UTC midnight; in the first few hours of the UTC day
+ *      VWAP is built from only a handful of candles, so "deviation vs VWAP"
+ *      is basically noise. Fall back to BB-midline (SMA20) anchor when the
+ *      VWAP sample is too thin.
+ *   2) "Flat VWAP" check compared VWAP to SMA10 of closes — apples to
+ *      oranges. Replaced with a real slope check against the BB midline.
+ *
+ * New rules:
+ * - Regime RANGE + ADX < 20
+ * - Use BB midline as anchor (it's more stable than intraday VWAP on 1H)
+ * - Require deviation 2–4 ATR from anchor
+ * - Anchor (SMA20) must be genuinely flat: slope over 5 bars < 0.5%
+ * - 2-bar reversal: prev started the reversal, last confirms with breakout
  */
 export declare class HtfVwapReversionStrategy implements Strategy {
     name: string;

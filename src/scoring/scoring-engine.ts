@@ -84,13 +84,17 @@ export class ScoringEngine {
             }
         }
 
-        // Hard BTC gate for trend-following strategies on HTF
-        if (isTrendFollow && ctx.btcContext) {
+        // Hard BTC gate for ALL strategies (real-data: counter-BTC trades net negative
+        // regardless of category — mean-reversion shorts in BTC bullish lost -61% / 16 trades).
+        if (ctx.btcContext) {
             if (candidate.direction === SignalDirection.LONG && ctx.btcContext.trend === 'BEARISH') return { score: 0, label: ConfidenceLabel.IGNORE };
             if (candidate.direction === SignalDirection.SHORT && ctx.btcContext.trend === 'BULLISH') return { score: 0, label: ConfidenceLabel.IGNORE };
         }
 
-        score = Math.min(100, Math.max(0, score));
+        // Cap at 95 so bonus stacking can't clip every signal to a ceiling 100.
+        // Real-data showed the 100-bucket had the worst PnL (-50% on 13 trades) because
+        // many disparate setups all flattened to "perfect" — ranking became meaningless.
+        score = Math.min(95, Math.max(0, score));
 
         let label = ConfidenceLabel.IGNORE;
         if (score >= 90) label = ConfidenceLabel.A_PLUS;

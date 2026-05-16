@@ -95,6 +95,12 @@ export class CombinationEngine {
 
         if (combo.contextFilter && !combo.contextFilter(ctx)) return null;
 
+        // BTC trend gate — combos previously bypassed it and consistently topped score=100 with worst PnL.
+        if (ctx.btcContext) {
+            if (direction === SignalDirection.LONG && ctx.btcContext.trend === 'BEARISH') return null;
+            if (direction === SignalDirection.SHORT && ctx.btcContext.trend === 'BULLISH') return null;
+        }
+
         const matchedReasons = uniqueMatches.map(n => `✓ ${n}`);
 
         logger.info(`[COMBO] ${combo.name} triggered: ${uniqueMatches.join(' + ')} → ${direction}`);

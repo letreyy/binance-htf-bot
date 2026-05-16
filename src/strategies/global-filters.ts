@@ -73,17 +73,21 @@ function canBypassTrendFilter(ctx: StrategyContext, strategyName?: string): bool
 export function passesDirectionFilter(ctx: StrategyContext, direction: SignalDirection, strategyName?: string): boolean {
     if (!filterConfig.htfTrendEnabled) return true;
 
-    const bypass = canBypassTrendFilter(ctx, strategyName);
+    const symbolEmaBypass = canBypassTrendFilter(ctx, strategyName);
 
     const price = ctx.candles[ctx.candles.length - 1].close;
     const ema200 = ctx.indicators.ema200;
 
-    if (filterConfig.htfTrendEnabled && !bypass) {
+    // Symbol EMA200 gate — mean-reversion in genuine consolidation may bypass.
+    if (filterConfig.htfTrendEnabled && !symbolEmaBypass) {
         if (direction === SignalDirection.LONG && price < ema200) return false;
         if (direction === SignalDirection.SHORT && price > ema200) return false;
     }
 
-    if (filterConfig.btcFilterEnabled && ctx.btcContext && !bypass) {
+    // BTC trend gate — NO bypass. Real-data analysis (28 trades) showed every
+    // counter-BTC short during a BTC bull leg lost money on average, even when
+    // the symbol itself was in a local range. The macro tape wins.
+    if (filterConfig.btcFilterEnabled && ctx.btcContext) {
         if (direction === SignalDirection.LONG && ctx.btcContext.trend === 'BEARISH') return false;
         if (direction === SignalDirection.SHORT && ctx.btcContext.trend === 'BULLISH') return false;
     }

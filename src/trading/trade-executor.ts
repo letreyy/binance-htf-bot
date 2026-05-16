@@ -361,7 +361,9 @@ ${pendingOrders.map(t => `- <b>${t.symbol}</b> ${t.direction} (Limit: ${t.entryP
 
                 if (!tpReached) break;
 
-                const portion = trade.tpHit < 2 ? 0.35 : 0.15;
+                // Aligns with TP_WEIGHTS in risk-engine: lock more on TP1, leave a small runner.
+                const PORTIONS = [0.50, 0.30, 0.10, 0.10];
+                const portion = PORTIONS[trade.tpHit] ?? 0.10;
                 const tpPnlRaw = isLong
                     ? (nextTp - trade.entryPrice) / trade.entryPrice
                     : (trade.entryPrice - nextTp) / trade.entryPrice;
@@ -562,7 +564,7 @@ ${pendingOrders.map(t => `- <b>${t.symbol}</b> ${t.direction} (Limit: ${t.entryP
             logger.info(`[LIVE] Entry: ${entryOrder.id}`);
 
             const tps = signal.levels.tp;
-            const tpPortions = [0.35, 0.35, 0.15, 0.15];
+            const tpPortions = [0.50, 0.30, 0.10, 0.10];
             const closeDirection = direction === 'buy' ? 'sell' : 'buy';
 
             for (let i = 0; i < tps.length; i++) {

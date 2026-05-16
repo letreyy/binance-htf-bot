@@ -6,7 +6,9 @@ const MIN_RISK_PERCENT = 1.0;  // Minimum SL distance: 1.0%
 const MAX_RISK_PERCENT = 5.0;  // HTF: Tightened from 7% — if a strategy needs more, signal is rejected
 export const REJECT_SL_ABOVE_PCT = 6.0; // Hard reject before risk engine even runs
 
-const TP_WEIGHTS = [0.35, 0.35, 0.15, 0.15];
+// Weighted RR — real-data shows TP1 hits most often, TP2+ rarely.
+// Skew weight to TP1 to reflect realized R distribution.
+const TP_WEIGHTS = [0.50, 0.30, 0.10, 0.10];
 
 export class RiskEngine {
     /**

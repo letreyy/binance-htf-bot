@@ -391,6 +391,12 @@ export class HtfBollingerReversalStrategy implements Strategy {
         const last = candles[candles.length - 1];
         const prev = candles[candles.length - 2];
 
+        // Hard EMA-stack guard: even in a "RANGE" classification, refuse to fade
+        // a stacked trend. Real-data: 0/7 wins with -42% — every loss had price
+        // pushing past EMA stack while regime briefly read RANGE.
+        const trendUp = indicators.ema20 > indicators.ema50 && indicators.ema50 > indicators.ema200;
+        const trendDown = indicators.ema20 < indicators.ema50 && indicators.ema50 < indicators.ema200;
+
         const volumeRatio = last.volume / indicators.volumeSma;
         if (volumeRatio < 1.3) return null;
 
@@ -414,6 +420,7 @@ export class HtfBollingerReversalStrategy implements Strategy {
 
         // ─── BULLISH: prev pierced lower band; both prev and last close back inside
         if (
+            !trendDown &&                                                // never long while stack is fully bearish
             prev.low < indicators.bbLower &&
             prev.close >= indicators.bbLower &&                          // prev already reclaimed
             last.close > indicators.bbLower + bandWidth * 0.15 &&        // last pushes further in
@@ -440,6 +447,7 @@ export class HtfBollingerReversalStrategy implements Strategy {
         }
 
         if (
+            !trendUp &&                                                  // never short while stack is fully bullish
             prev.high > indicators.bbUpper &&
             prev.close <= indicators.bbUpper &&
             last.close < indicators.bbUpper - bandWidth * 0.15 &&

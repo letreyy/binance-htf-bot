@@ -6,6 +6,7 @@ interface PaperTrade {
     symbol: string;
     direction: SignalDirection;
     entryPrice: number;
+    initialSl: number;
     sl: number;
     tp: number[];
     tpHit: number;
@@ -18,7 +19,9 @@ interface PaperTrade {
     status: 'PENDING' | 'ACTIVE';
     expireAt: number;
     orderType: 'MARKET' | 'LIMIT';
-    dcaCount: number;
+    activatedAt: number;
+    mfe: number;
+    mae: number;
 }
 export declare class TradeExecutor {
     private exchange;
@@ -31,6 +34,7 @@ export declare class TradeExecutor {
     private targetRiskPercent;
     private leverageConfig;
     private registeredStrategies;
+    private recentSignalDirections;
     init(strategies: Strategy[]): Promise<void>;
     isStrategyDisabled(strategyName: string): boolean;
     isOnSlCooldown(symbol: string, strategyName: string): boolean;
@@ -46,7 +50,22 @@ export declare class TradeExecutor {
      * Get number of active/pending trades in a specific direction
      */
     getActiveCountByDirection(direction: SignalDirection): number;
-    processSignal(signal: FinalSignal, currentPrice?: number): Promise<void>;
+    /**
+     * Check correlation cluster exposure. Returns true if adding this symbol
+     * would push its correlation group above MAX_PER_GROUP active trades.
+     */
+    exceedsCorrelationCap(symbol: string): boolean;
+    getCorrelationGroup(symbol: string): string | null;
+    /**
+     * Record an issued signal direction for the rolling 24h directional cap.
+     */
+    recordSignalDirection(direction: SignalDirection): void;
+    /**
+     * Returns true if adding a new signal in `direction` would push the 24h
+     * directional share above the cap. No-op until MIN_SIGNALS accumulated.
+     */
+    exceedsDirectionalDailyCap(direction: SignalDirection): boolean;
+    processSignal(signal: FinalSignal, _currentPrice?: number): Promise<void>;
     private executeLiveTrade;
     private calculateLivePositionSize;
     panicCloseAll(): Promise<void>;
